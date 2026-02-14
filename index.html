@@ -237,6 +237,7 @@ body:not(.retro) #macbar { display: none; }
     <button id="btnLastStand" onclick="doLastStand()">🔥 Last Stand</button>
     <button id="btnAutoplay" onclick="toggleAutoplay()">🤖 Auto</button>
     <button id="btnLearn" onclick="toggleLearn()">🧠 Learn</button>
+    <button id="btnFastLearn" onclick="toggleFastLearn()" style="display:none">⚡ Fast</button>
   </div>
 </div>
 
@@ -271,49 +272,96 @@ const DEFAULT_WEIGHTS = {
   futureCollW: 30,    // bonus per future collision
   dupeAngleW: 20,     // bonus per duplicate approach angle
   scrapLineW: 25,     // bonus per dalek with scrap in its path
-  sonicThreshold: 3,  // adjacent daleks needed to use sonic
-  sonicDesperateThreshold: 1, // adjacent daleks when cornered
 };
 
-let aiWeights = loadWeights();
-let bestWeights = {...aiWeights};
-let bestAIScore = +(localStorage.getItem('daleksBestAI') || 0);
+const POP_SIZE = 8;
+let population = loadPopulation();
+let aiWeights = {...population[0].w};
 let aiGeneration = +(localStorage.getItem('daleksGeneration') || 0);
+let bestAIScore = population[0].score;
 let learningMode = false;
+let learnFast = false;
+let recentScores = [];
+let gamesPlayed = +(localStorage.getItem('daleksGamesPlayed') || 0);
 
-function loadWeights() {
+function loadPopulation() {
   try {
-    const saved = localStorage.getItem('daleksWeights');
-    if (saved) return {...DEFAULT_WEIGHTS, ...JSON.parse(saved)};
+    const saved = localStorage.getItem('daleksPopulation');
+    if (saved) {
+      const pop = JSON.parse(saved);
+      // Ensure all weights have new keys
+      return pop.map(p => ({w: {...DEFAULT_WEIGHTS, ...p.w}, score: p.score}));
+    }
   } catch(e) {}
-  return {...DEFAULT_WEIGHTS};
+  // Initialize population with slight variations of defaults
+  const pop = [];
+  for (let i = 0; i < POP_SIZE; i++) {
+    pop.push({w: i === 0 ? {...DEFAULT_WEIGHTS} : mutateWeights(DEFAULT_WEIGHTS, 0.3), score: 0});
+  }
+  return pop;
 }
 
-function saveWeights(w, score, gen) {
-  localStorage.setItem('daleksWeights', JSON.stringify(w));
-  localStorage.setItem('daleksBestAI', score);
-  localStorage.setItem('daleksGeneration', gen);
+function savePopulation() {
+  population.sort((a, b) => b.score - a.score);
+  localStorage.setItem('daleksPopulation', JSON.stringify(population));
+  localStorage.setItem('daleksGeneration', aiGeneration);
+  localStorage.setItem('daleksGamesPlayed', gamesPlayed);
 }
 
-function mutateWeights(w) {
+function mutateWeights(w, strength) {
+  const s = strength || 0.4;
   const mutated = {...w};
   const keys = Object.keys(mutated);
-  // Mutate 2-4 random weights
-  const numMutations = 2 + Math.floor(Math.random() * 3);
+  const numMutations = 1 + Math.floor(Math.random() * keys.length * 0.4);
   for (let i = 0; i < numMutations; i++) {
     const k = keys[Math.floor(Math.random() * keys.length)];
     const scale = Math.abs(mutated[k]) || 1;
-    mutated[k] += (Math.random() - 0.5) * scale * 0.4;
+    mutated[k] += (Math.random() - 0.5) * scale * s;
   }
   return mutated;
 }
 
+function crossover(a, b) {
+  const child = {};
+  const keys = Object.keys(a);
+  for (const k of keys) {
+    child[k] = Math.random() < 0.5 ? a[k] : b[k];
+  }
+  return child;
+}
+
+function pickParent() {
+  // Tournament selection: pick 3 random, return best
+  const candidates = [];
+  for (let i = 0; i < 3; i++) {
+    candidates.push(population[Math.floor(Math.random() * population.length)]);
+  }
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0];
+}
+
+function nextGenWeights() {
+  const p1 = pickParent();
+  const p2 = pickParent();
+  // 70% crossover + mutate, 30% just mutate best
+  if (Math.random() < 0.7) {
+    return mutateWeights(crossover(p1.w, p2.w), 0.3);
+  } else {
+    return mutateWeights(p1.w, 0.2 + Math.random() * 0.3);
+  }
+}
+
 function resetWeights() {
+  population = [];
+  for (let i = 0; i < POP_SIZE; i++) {
+    population.push({w: i === 0 ? {...DEFAULT_WEIGHTS} : mutateWeights(DEFAULT_WEIGHTS, 0.3), score: 0});
+  }
   aiWeights = {...DEFAULT_WEIGHTS};
-  bestWeights = {...DEFAULT_WEIGHTS};
   bestAIScore = 0;
   aiGeneration = 0;
-  saveWeights(aiWeights, 0, 0);
+  gamesPlayed = 0;
+  recentScores = [];
+  savePopulation();
 }
 
 // 8x8 pixel art sprites for 1984 Mac style
@@ -520,6 +568,7 @@ function sizeCanvas() {
 
 function render() {
   if (!ctx) return;
+  if (learnFast && learningMode) return;
   const w = canvas.width, h = canvas.height;
   const bg = retroMode ? '#f0f0e8' : '#0a0a0a';
   const fg = retroMode ? '#000000' : '#00ff41';
@@ -670,11 +719,17 @@ function updateUI() {
   document.getElementById('btnAutoplay').textContent = autoplayActive && !learningMode ? '⏹ Stop' : '🤖 Auto';
   document.getElementById('btnAutoplay').style.borderColor = autoplayActive && !learningMode ? (retroMode ? '#000' : '#ff6644') : '';
   document.getElementById('btnAutoplay').disabled = learningMode;
-  document.getElementById('btnLearn').textContent = learningMode ? '⏹ Stop Learning' : '🧠 Learn';
+  document.getElementById('btnLearn').textContent = learningMode ? '⏹ Stop' : '🧠 Learn';
   document.getElementById('btnLearn').style.borderColor = learningMode ? (retroMode ? '#000' : '#ff6644') : '';
+  const btnFast = document.getElementById('btnFastLearn');
+  btnFast.style.display = learningMode ? '' : 'none';
+  btnFast.textContent = learnFast ? '👁 Watch' : '⚡ Fast';
+  btnFast.style.borderColor = learnFast ? (retroMode ? '#000' : '#ffdd00') : '';
   const learnStat = document.getElementById('statLearn');
   learnStat.style.display = learningMode || aiGeneration > 0 ? '' : 'none';
-  learnStat.textContent = '🧠 Gen ' + aiGeneration + ' | Best: ' + bestAIScore;
+  const avg = recentScores.length > 0 ? Math.round(recentScores.reduce((a,b)=>a+b,0)/recentScores.length) : 0;
+  const popWorst = population.length > 0 ? population[population.length-1].score : 0;
+  learnStat.textContent = '🧠 Games: ' + gamesPlayed + ' | Best: ' + bestAIScore + ' | Avg: ' + avg + ' | Floor: ' + popWorst;
   const totalCells = COLS * ROWS;
   // Collect all dangerous cells: daleks, scrap, and cells daleks can reach
   const dangerSet = new Set();
@@ -806,8 +861,7 @@ function doSonic() {
   if (state.daleks.size === 0) {
     state.levelComplete = true;
     updateHighScore();
-    render();
-    showLevelComplete();
+    if (!learnFast) { render(); showLevelComplete(); }
     return;
   }
   moveDaleks();
@@ -897,7 +951,7 @@ function moveDaleks() {
   if (surviving.size === 0) {
     state.levelComplete = true;
     updateHighScore();
-    showLevelComplete();
+    if (!learnFast) showLevelComplete();
   }
   render();
 }
@@ -906,6 +960,7 @@ function toggleAutoplay() {
   if (autoplayActive) {
     stopAutoplay();
   } else {
+    aiWeights = {...population[0].w}; // use best learned weights
     autoplayActive = true;
     runAutoplay();
   }
@@ -915,6 +970,7 @@ function toggleAutoplay() {
 function stopAutoplay() {
   autoplayActive = false;
   learningMode = false;
+  learnFast = false;
   if (autoplayTimer) { clearTimeout(autoplayTimer); autoplayTimer = null; }
   explosion = null;
 }
@@ -922,14 +978,32 @@ function stopAutoplay() {
 function toggleLearn() {
   if (learningMode) {
     stopAutoplay();
+    learnFast = false;
     render();
   } else {
     learningMode = true;
     autoplayActive = true;
-    aiWeights = mutateWeights(bestWeights);
+    aiWeights = nextGenWeights();
     state = initState(1, 0);
     render();
-    autoplayTimer = setTimeout(runAutoplay, learningMode ? 20 : 300);
+    autoplayTimer = setTimeout(runAutoplay, 20);
+  }
+}
+
+function toggleFastLearn() {
+  learnFast = !learnFast;
+  const btn = document.getElementById('btnFastLearn');
+  btn.textContent = learnFast ? '👁 Watch' : '⚡ Fast';
+  btn.style.borderColor = learnFast ? (retroMode ? '#000' : '#ffdd00') : '';
+  if (learnFast) {
+    // Cancel slow timer and start batch loop
+    if (autoplayTimer) { clearTimeout(autoplayTimer); autoplayTimer = null; }
+    runFastBatch();
+  } else {
+    // Switch back to visible mode
+    if (autoplayTimer) { clearTimeout(autoplayTimer); autoplayTimer = null; }
+    render();
+    autoplayTimer = setTimeout(runAutoplay, 20);
   }
 }
 
@@ -941,6 +1015,7 @@ function runAutoplay() {
   if (state.staleTurns >= 15) {
     state.staleTurns = 0;
     doTeleport();
+    if (learnFast) return; // batch loop handles it
     if (!state.gameOver && !state.levelComplete) {
       autoplayTimer = setTimeout(runAutoplay, learningMode ? 20 : 200);
     } else if (state.levelComplete) {
@@ -1010,31 +1085,65 @@ function runAutoplay() {
     validMoves.push(d);
   }
 
-  // Use sonic when 3+ daleks are adjacent
+  if (validMoves.length === 0 && state.sonicUses <= 0) {
+    doTeleport();
+    if (!state.gameOver && !state.levelComplete) {
+      autoplayTimer = setTimeout(runAutoplay, learningMode ? 20 : 200);
+    }
+    return;
+  }
+
+  let bestScore = -Infinity;
+  let bestMove = validMoves.length > 0 ? validMoves[0] : null;
+  let bestIsSonic = false;
+
+  // Evaluate sonic as an option
   if (state.sonicUses > 0) {
+    // Count adjacent daleks that sonic would kill
     let adjDaleks = 0;
     for (const dk of state.daleks) {
       const [bx, by] = parseKey(dk);
       if (Math.abs(bx - state.px) <= 1 && Math.abs(by - state.py) <= 1) adjDaleks++;
     }
-    const st = Math.round(aiWeights.sonicThreshold);
-    const sdt = Math.round(aiWeights.sonicDesperateThreshold);
-    if (adjDaleks >= st || (validMoves.length <= 1 && adjDaleks >= sdt)) {
-      doSonic();
-    } else {
-      aiPickMove(validMoves, allDirs, simMove, countEscapes);
+
+    if (adjDaleks > 0) {
+      // Simulate: after sonic, daleks move
+      const postSonicDaleks = new Set();
+      for (const dk of state.daleks) {
+        const [bx, by] = parseKey(dk);
+        if (Math.abs(bx - state.px) <= 1 && Math.abs(by - state.py) <= 1) continue;
+        postSonicDaleks.add(dk);
+      }
+      const simAfterSonic = simMove(state.px, state.py, postSonicDaleks, state.scrap);
+
+      let sonicScore = adjDaleks * aiWeights.destroyedW;
+      sonicScore += simAfterSonic.destroyed * aiWeights.destroyedW * 0.5;
+      // Huge bonus if sonic would clear the level
+      if (postSonicDaleks.size === 0) sonicScore += 500;
+      // Bonus if cornered — sonic is the escape
+      if (validMoves.length <= 1) sonicScore += 200;
+      // Penalize using sonic on just 1 dalek (save it for clusters)
+      if (adjDaleks === 1 && validMoves.length > 2 && postSonicDaleks.size > 2) sonicScore -= 150;
+
+      // Check: would MORE daleks be adjacent next turn if we wait?
+      // Count how many daleks are 2 steps away (will be adjacent next turn)
+      let futureAdj = 0;
+      for (const dk of state.daleks) {
+        const [bx, by] = parseKey(dk);
+        const dist = Math.max(Math.abs(bx - state.px), Math.abs(by - state.py));
+        if (dist === 2) futureAdj++;
+      }
+      // If waiting would catch more daleks and we can safely wait, penalize using now
+      if (futureAdj > adjDaleks && validMoves.length > 2) {
+        sonicScore -= (futureAdj - adjDaleks) * 40;
+      }
+
+      if (sonicScore > bestScore) {
+        bestScore = sonicScore;
+        bestIsSonic = true;
+      }
     }
-  } else {
-    aiPickMove(validMoves, allDirs, simMove, countEscapes);
   }
-
-  function aiPickMove(validMoves, allDirs, simMove, countEscapes) {
-    if (validMoves.length === 0) {
-      doTeleport(); return;
-    }
-
-    let bestScore = -Infinity;
-    let bestMove = validMoves[0];
 
     for (const d of validMoves) {
       const nx = state.px + d.dx, ny = state.py + d.dy;
@@ -1143,17 +1252,25 @@ function runAutoplay() {
       }
     }
 
-    if (bestMove.dx === 0 && bestMove.dy === 0) {
-      doWait();
-    } else {
-      doMove(bestMove.dx, bestMove.dy);
-    }
+  if (bestIsSonic) {
+    doSonic();
+  } else if (!bestMove) {
+    doTeleport();
+  } else if (bestMove.dx === 0 && bestMove.dy === 0) {
+    doWait();
+  } else {
+    doMove(bestMove.dx, bestMove.dy);
   }
 
   if (!state.gameOver && !state.levelComplete) {
+    if (learnFast) return; // batch loop handles next call
     autoplayTimer = setTimeout(runAutoplay, learningMode ? 20 : 200);
   } else if (state.levelComplete) {
-    // Auto-continue to next level
+    if (learnFast) {
+      hideOverlay();
+      state = initState(state.level + 1, state.score);
+      return; // batch loop continues
+    }
     autoplayTimer = setTimeout(() => {
       hideOverlay();
       state = initState(state.level + 1, state.score);
@@ -1163,6 +1280,61 @@ function runAutoplay() {
   } else if (!learningMode) {
     stopAutoplay();
   }
+}
+
+function runFastBatch() {
+  if (!learnFast || !learningMode) { render(); return; }
+  const start = performance.now();
+  const startGames = gamesPlayed;
+  // Run full games silently for up to 80ms
+  while (performance.now() - start < 80) {
+    if (!learningMode || !learnFast) break;
+    // Play one full game silently
+    runSilentGame();
+    // Render every 10th game
+    if ((gamesPlayed - startGames) % 10 === 0) break;
+  }
+  // Show state of latest game
+  updateUI();
+  if ((gamesPlayed % 10) === 0) render();
+  if (learnFast && learningMode) {
+    autoplayTimer = setTimeout(runFastBatch, 1);
+  }
+}
+
+function runSilentGame() {
+  state = initState(1, 0);
+  autoplayActive = true;
+  aiWeights = nextGenWeights();
+  let turns = 0;
+  const maxTurns = 5000; // safety limit
+
+  while (turns < maxTurns) {
+    if (state.gameOver) break;
+    if (state.levelComplete) {
+      state = initState(state.level + 1, state.score);
+      continue;
+    }
+    // Run one AI turn (calls doMove/doWait/doTeleport/doSonic which call moveDaleks)
+    runAutoplay();
+    turns++;
+  }
+
+  // Record result
+  aiGeneration++;
+  gamesPlayed++;
+  recentScores.push(state.score);
+  if (recentScores.length > 20) recentScores.shift();
+
+  population.sort((a, b) => b.score - a.score);
+  const worst = population[population.length - 1];
+  if (state.score > worst.score) {
+    population[population.length - 1] = {w: {...aiWeights}, score: state.score};
+    population.sort((a, b) => b.score - a.score);
+  }
+  bestAIScore = population[0].score;
+  // Save every 10 games to reduce IO
+  if (gamesPlayed % 10 === 0) savePopulation();
 }
 
 function endGame() {
@@ -1175,20 +1347,29 @@ function endGame() {
 
   // Learning: evaluate this run's weights
   if (wasLearning) {
-    aiGeneration++;
-    if (state.score > bestAIScore) {
-      // This mutation was better — keep it
-      bestAIScore = state.score;
-      bestWeights = {...aiWeights};
-      saveWeights(aiWeights, bestAIScore, aiGeneration);
-    } else {
-      // Revert to best and try a new mutation
-      aiWeights = {...bestWeights};
+    if (learnFast) {
+      // runSilentGame handles all bookkeeping — just stop here
+      return;
     }
-    // Mutate for next run and auto-restart
-    aiWeights = mutateWeights(bestWeights);
+
+    aiGeneration++;
+    gamesPlayed++;
+    recentScores.push(state.score);
+    if (recentScores.length > 20) recentScores.shift();
+
+    population.sort((a, b) => b.score - a.score);
+    const worst = population[population.length - 1];
+    if (state.score > worst.score) {
+      population[population.length - 1] = {w: {...aiWeights}, score: state.score};
+      population.sort((a, b) => b.score - a.score);
+    }
+    bestAIScore = population[0].score;
+    savePopulation();
+
+    aiWeights = nextGenWeights();
+
     playExplosion(state.px, state.py, () => {
-      if (!learningMode) return; // user stopped learning during explosion
+      if (!learningMode) return;
       state = initState(1, 0);
       autoplayActive = true;
       render();
@@ -1311,7 +1492,7 @@ document.addEventListener('keydown', e => {
 // Init menu
 highScore = +(localStorage.getItem('daleksHigh') || 0);
 document.getElementById('menuHigh').textContent = highScore > 0 ? 'High Score: ' + highScore : '';
-document.getElementById('menuAI').textContent = aiGeneration > 0 ? '🧠 AI: Gen ' + aiGeneration + ' | Best: ' + bestAIScore : '';
+document.getElementById('menuAI').textContent = aiGeneration > 0 ? '🧠 AI: Gen ' + aiGeneration + ' | Best: ' + bestAIScore + ' | Pop: ' + POP_SIZE : '';
 </script>
 </body>
 </html>
