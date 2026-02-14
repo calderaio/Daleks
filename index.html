@@ -230,6 +230,7 @@ body:not(.retro) #macbar { display: none; }
     <span id="deathProb">☠ 0%</span>
     <span id="statLearn" style="display:none">🧠 Gen 0 | Best: 0</span>
   </div>
+  <canvas id="graphCanvas" style="display:none;flex-shrink:0" height="60"></canvas>
   <div id="bottombar">
     <button id="btnTeleport" onclick="doTeleport()">⚡ Teleport</button>
 
@@ -282,6 +283,7 @@ let bestAIScore = population[0].score;
 let learningMode = false;
 let learnFast = false;
 let recentScores = [];
+let scoreHistory = []; // rolling average history for graph
 let gamesPlayed = +(localStorage.getItem('daleksGamesPlayed') || 0);
 
 function loadPopulation() {
@@ -361,6 +363,7 @@ function resetWeights() {
   aiGeneration = 0;
   gamesPlayed = 0;
   recentScores = [];
+  scoreHistory = [];
   savePopulation();
   document.getElementById('menuAI').textContent = '';
 }
@@ -721,10 +724,8 @@ function updateUI() {
   document.getElementById('btnAutoplay').disabled = learningMode;
   document.getElementById('btnLearn').textContent = learningMode ? '⏹ Stop' : '🧠 Learn';
   document.getElementById('btnLearn').style.borderColor = learningMode ? (retroMode ? '#000' : '#ff6644') : '';
-  const btnFast = document.getElementById('btnFastLearn');
-  btnFast.style.display = learningMode ? '' : 'none';
-  btnFast.textContent = learnFast ? '👁 Watch' : '⚡ Fast';
-  btnFast.style.borderColor = learnFast ? (retroMode ? '#000' : '#ffdd00') : '';
+  document.getElementById('btnFastLearn').style.display = learningMode ? '' : 'none';
+  updateFastButton();
   const learnStat = document.getElementById('statLearn');
   learnStat.style.display = learningMode || aiGeneration > 0 ? '' : 'none';
   const avg = recentScores.length > 0 ? Math.round(recentScores.reduce((a,b)=>a+b,0)/recentScores.length) : 0;
@@ -756,6 +757,81 @@ function updateUI() {
   document.getElementById('statUnsafe').textContent = '⛔ ' + dangerCount;
   document.getElementById('deathProb').textContent = '☠ ' + pct + '%';
   document.getElementById('menuHigh').textContent = highScore > 0 ? 'High Score: ' + highScore : '';
+  // Show/hide graph
+  const gc = document.getElementById('graphCanvas');
+  gc.style.display = (learningMode || scoreHistory.length > 0) ? 'block' : 'none';
+}
+
+function recordScore(score) {
+  recentScores.push(score);
+  if (recentScores.length > 20) recentScores.shift();
+  const avg = Math.round(recentScores.reduce((a,b) => a+b, 0) / recentScores.length);
+  scoreHistory.push({game: gamesPlayed, avg, best: bestAIScore, raw: score});
+  if (scoreHistory.length > 200) scoreHistory.shift();
+}
+
+function drawGraph() {
+  const gc = document.getElementById('graphCanvas');
+  if (!gc || scoreHistory.length < 2) return;
+  const gctx = gc.getContext('2d');
+  const w = gc.parentElement ? gc.parentElement.clientWidth : 300;
+  gc.width = w;
+  const h = gc.height;
+  const bg = retroMode ? '#f0f0e8' : '#111';
+  const avgColor = retroMode ? '#000' : '#00ff41';
+  const bestColor = retroMode ? '#555' : '#ffdd00';
+  const rawColor = retroMode ? '#aaa' : 'rgba(0,255,65,0.2)';
+
+  gctx.fillStyle = bg;
+  gctx.fillRect(0, 0, w, h);
+
+  const data = scoreHistory;
+  let maxVal = 1;
+  for (const d of data) maxVal = Math.max(maxVal, d.avg, d.best, d.raw);
+
+  const xStep = w / (data.length - 1);
+  const yScale = (h - 8) / maxVal;
+
+  // Raw scores (dots)
+  gctx.fillStyle = rawColor;
+  for (let i = 0; i < data.length; i++) {
+    const x = i * xStep;
+    const y = h - 4 - data[i].raw * yScale;
+    gctx.fillRect(x - 1, y - 1, 2, 2);
+  }
+
+  // Average line
+  gctx.strokeStyle = avgColor;
+  gctx.lineWidth = 1.5;
+  gctx.beginPath();
+  for (let i = 0; i < data.length; i++) {
+    const x = i * xStep;
+    const y = h - 4 - data[i].avg * yScale;
+    i === 0 ? gctx.moveTo(x, y) : gctx.lineTo(x, y);
+  }
+  gctx.stroke();
+
+  // Best line
+  gctx.strokeStyle = bestColor;
+  gctx.lineWidth = 1;
+  gctx.setLineDash([3, 3]);
+  gctx.beginPath();
+  for (let i = 0; i < data.length; i++) {
+    const x = i * xStep;
+    const y = h - 4 - data[i].best * yScale;
+    i === 0 ? gctx.moveTo(x, y) : gctx.lineTo(x, y);
+  }
+  gctx.stroke();
+  gctx.setLineDash([]);
+
+  // Labels
+  gctx.font = '9px monospace';
+  gctx.fillStyle = avgColor;
+  gctx.fillText('avg', 2, 10);
+  gctx.fillStyle = bestColor;
+  gctx.fillText('best', 30, 10);
+  gctx.fillStyle = retroMode ? '#000' : '#888';
+  gctx.fillText(maxVal + '', w - 30, 10);
 }
 
 function onCanvasClick(e) {
@@ -991,22 +1067,26 @@ function toggleLearn() {
 }
 
 function toggleFastLearn() {
+  if (autoplayTimer) { clearTimeout(autoplayTimer); autoplayTimer = null; }
   learnFast = !learnFast;
-  const btn = document.getElementById('btnFastLearn');
-  btn.textContent = learnFast ? '👁 Watch' : '⚡ Fast';
-  btn.style.borderColor = learnFast ? (retroMode ? '#000' : '#ffdd00') : '';
+  updateFastButton();
   if (learnFast) {
-    // Cancel slow timer and start batch loop after repaint
-    if (autoplayTimer) { clearTimeout(autoplayTimer); autoplayTimer = null; }
-    setTimeout(runFastBatch, 0);
+    // Start batch loop after repaint so button visually updates
+    requestAnimationFrame(() => { runFastBatch(); });
   } else {
     // Switch back to visible mode
-    if (autoplayTimer) { clearTimeout(autoplayTimer); autoplayTimer = null; }
     autoplayActive = true;
     state = initState(1, 0);
     render();
     autoplayTimer = setTimeout(runAutoplay, 20);
   }
+}
+
+function updateFastButton() {
+  const btn = document.getElementById('btnFastLearn');
+  btn.textContent = learnFast ? '👁 Watch' : '⚡ Fast';
+  btn.style.borderColor = learnFast ? (retroMode ? '#000' : '#ffdd00') : '';
+  btn.style.background = learnFast ? 'rgba(255,221,0,0.25)' : '';
 }
 
 function runAutoplay() {
@@ -1293,6 +1373,7 @@ function runFastBatch() {
     runSilentGame();
   }
   updateUI();
+  drawGraph();
   // Render every 50th game so user can see progress
   if ((gamesPlayed % 50) === 0) render();
   if (learnFast && learningMode) {
@@ -1321,8 +1402,7 @@ function runSilentGame() {
   // Record result
   aiGeneration++;
   gamesPlayed++;
-  recentScores.push(state.score);
-  if (recentScores.length > 20) recentScores.shift();
+  recordScore(state.score);
 
   population.sort((a, b) => b.score - a.score);
   const worst = population[population.length - 1];
@@ -1331,7 +1411,6 @@ function runSilentGame() {
     population.sort((a, b) => b.score - a.score);
   }
   bestAIScore = population[0].score;
-  // Save every 10 games to reduce IO
   if (gamesPlayed % 10 === 0) savePopulation();
 }
 
@@ -1352,8 +1431,7 @@ function endGame() {
 
     aiGeneration++;
     gamesPlayed++;
-    recentScores.push(state.score);
-    if (recentScores.length > 20) recentScores.shift();
+    recordScore(state.score);
 
     population.sort((a, b) => b.score - a.score);
     const worst = population[population.length - 1];
@@ -1368,6 +1446,7 @@ function endGame() {
 
     playExplosion(state.px, state.py, () => {
       if (!learningMode) return;
+      drawGraph();
       state = initState(1, 0);
       autoplayActive = true;
       render();
