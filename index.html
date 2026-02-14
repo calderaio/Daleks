@@ -1002,6 +1002,8 @@ function toggleFastLearn() {
   } else {
     // Switch back to visible mode
     if (autoplayTimer) { clearTimeout(autoplayTimer); autoplayTimer = null; }
+    autoplayActive = true;
+    state = initState(1, 0);
     render();
     autoplayTimer = setTimeout(runAutoplay, 20);
   }
@@ -1289,14 +1291,15 @@ function runFastBatch() {
   // Run full games silently for up to 80ms
   while (performance.now() - start < 80) {
     if (!learningMode || !learnFast) break;
-    // Play one full game silently
     runSilentGame();
-    // Render every 10th game
-    if ((gamesPlayed - startGames) % 10 === 0) break;
   }
-  // Show state of latest game
   updateUI();
-  if ((gamesPlayed % 10) === 0) render();
+  // Render every 50th game so user can see progress
+  if ((gamesPlayed % 50) === 0) {
+    learnFast = false; // temporarily allow render
+    render();
+    learnFast = true;
+  }
   if (learnFast && learningMode) {
     autoplayTimer = setTimeout(runFastBatch, 1);
   }
