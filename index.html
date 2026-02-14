@@ -996,9 +996,9 @@ function toggleFastLearn() {
   btn.textContent = learnFast ? '👁 Watch' : '⚡ Fast';
   btn.style.borderColor = learnFast ? (retroMode ? '#000' : '#ffdd00') : '';
   if (learnFast) {
-    // Cancel slow timer and start batch loop
+    // Cancel slow timer and start batch loop after repaint
     if (autoplayTimer) { clearTimeout(autoplayTimer); autoplayTimer = null; }
-    runFastBatch();
+    setTimeout(runFastBatch, 0);
   } else {
     // Switch back to visible mode
     if (autoplayTimer) { clearTimeout(autoplayTimer); autoplayTimer = null; }
@@ -1087,7 +1087,7 @@ function runAutoplay() {
 
   if (validMoves.length === 0 && state.sonicUses <= 0) {
     doTeleport();
-    if (!state.gameOver && !state.levelComplete) {
+    if (!state.gameOver && !state.levelComplete && !learnFast) {
       autoplayTimer = setTimeout(runAutoplay, learningMode ? 20 : 200);
     }
     return;
