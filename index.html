@@ -795,8 +795,7 @@ function drawGraph() {
   gctx.fillRect(0, 0, w, h);
 
   const data = scoreHistory;
-  let maxVal = 1;
-  for (const d of data) maxVal = Math.max(maxVal, d.avg, d.best, d.raw);
+  const maxVal = 7000;
 
   const xStep = w / (data.length - 1);
   const yScale = (h - 8) / maxVal;
