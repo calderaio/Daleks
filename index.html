@@ -478,7 +478,8 @@ function initState(level, score) {
     score, level,
 
     sonicUses: 1,
-    gameOver: false, levelComplete: false, lastStandActive: false
+    gameOver: false, levelComplete: false, lastStandActive: false,
+    staleTurns: 0, lastDalekCount: 0
   };
 }
 
@@ -882,6 +883,11 @@ function moveDaleks() {
 
   state.daleks = surviving;
   state.score += destroyed * 10;
+  if (destroyed > 0) {
+    state.staleTurns = 0;
+  } else {
+    state.staleTurns++;
+  }
 
   const pk = key(state.px, state.py);
   if (surviving.has(pk) || state.scrap.has(pk)) {
@@ -910,6 +916,7 @@ function stopAutoplay() {
   autoplayActive = false;
   learningMode = false;
   if (autoplayTimer) { clearTimeout(autoplayTimer); autoplayTimer = null; }
+  explosion = null;
 }
 
 function toggleLearn() {
@@ -927,8 +934,23 @@ function toggleLearn() {
 }
 
 function runAutoplay() {
-  if (!autoplayActive || state.gameOver || state.levelComplete) {
-    stopAutoplay();
+  if (!autoplayActive) return;
+  if (state.gameOver || state.levelComplete) return;
+
+  // Break stalemate: if no kills in 15+ turns, teleport
+  if (state.staleTurns >= 15) {
+    state.staleTurns = 0;
+    doTeleport();
+    if (!state.gameOver && !state.levelComplete) {
+      autoplayTimer = setTimeout(runAutoplay, learningMode ? 20 : 200);
+    } else if (state.levelComplete) {
+      autoplayTimer = setTimeout(() => {
+        hideOverlay();
+        state = initState(state.level + 1, state.score);
+        render();
+        autoplayTimer = setTimeout(runAutoplay, learningMode ? 50 : 500);
+      }, learningMode ? 100 : 1000);
+    }
     return;
   }
 
@@ -1098,6 +1120,21 @@ function runAutoplay() {
         }
         const duplicates = sim.daleks.size - angles.size;
         score += duplicates * W.dupeAngleW;
+      }
+
+      // Urgency: as stale turns increase, strongly prefer moves that kill
+      if (state.staleTurns > 3 && sim.destroyed === 0 && sim2destroyed === 0) {
+        score -= state.staleTurns * 5;
+      }
+      // When stale, prefer getting closer to scrap (to lure daleks through it)
+      if (state.staleTurns > 5 && sim.scrap.size > 0) {
+        let minScrapDist = Infinity;
+        for (const sk of sim.scrap) {
+          const [sx, sy] = parseKey(sk);
+          const sd = Math.abs(nx - sx) + Math.abs(ny - sy);
+          if (sd < minScrapDist) minScrapDist = sd;
+        }
+        score -= minScrapDist * 2;
       }
 
       if (score > bestScore) {
