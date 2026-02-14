@@ -1,0 +1,1280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>DALEKS</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0a0a0a;
+  color: #00ff41;
+  font-family: 'Courier New', monospace;
+  height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+#menu {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100dvh;
+  gap: 24px;
+}
+#menu h1 {
+  font-size: 3rem;
+  letter-spacing: 0.5em;
+  text-shadow: 0 0 20px #00ff41;
+}
+#menu .robots { font-size: 2rem; }
+#menu .high-score { color: #ffdd00; font-size: 1.1rem; }
+#menu button {
+  font-family: inherit;
+  font-size: 1.3rem;
+  font-weight: bold;
+  color: #00ff41;
+  background: transparent;
+  border: 2px solid #00ff41;
+  padding: 12px 40px;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background 0.2s;
+}
+#menu button:hover { background: rgba(0,255,65,0.15); }
+#menu .rules {
+  color: #888;
+  font-size: 0.8rem;
+  text-align: left;
+  line-height: 1.8;
+}
+#menu .rules span { font-size: 1rem; }
+
+#game { display: none; flex-direction: column; height: 100dvh; }
+#topbar {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 12px;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+#grid-container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 2px;
+}
+canvas {
+  display: block;
+  image-rendering: pixelated;
+}
+#bottombar {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+#bottombar button {
+  font-family: inherit;
+  font-size: 0.75rem;
+  color: #00ff41;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(0,255,65,0.4);
+  padding: 8px 14px;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+#bottombar button:hover { background: rgba(0,255,65,0.2); }
+#bottombar button:disabled { opacity: 0.35; cursor: default; }
+#bottombar button:active { background: rgba(0,255,65,0.3); }
+#statsbar {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  padding: 4px 8px;
+  font-size: 0.7rem;
+  flex-shrink: 0;
+  color: #888;
+}
+#statsbar span { white-space: nowrap; }
+#deathProb { color: #ff6644; }
+
+#overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 10;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+#overlay.show { display: flex; }
+#overlay h2 { font-size: 2.2rem; }
+#overlay .sub { color: #fff; font-size: 1.2rem; }
+#overlay .newhigh { color: #ffdd00; }
+#overlay button {
+  font-family: inherit;
+  font-size: 1rem;
+  color: #00ff41;
+  background: transparent;
+  border: 2px solid #00ff41;
+  padding: 10px 30px;
+  cursor: pointer;
+  border-radius: 8px;
+  margin: 4px;
+}
+#overlay button:hover { background: rgba(0,255,65,0.15); }
+.red { color: #ff4444; }
+.green { color: #00ff41; }
+
+body.retro { background: #f0f0e8; color: #000; }
+body.retro #topbar { color: #000; }
+body.retro #statsbar { color: #555; }
+body.retro #statsbar #deathProb { color: #000; }
+body.retro #bottombar button {
+  color: #000; background: #d8d8d0; border-color: #000;
+}
+body.retro #bottombar button:hover { background: #c0c0b8; }
+body.retro #bottombar button:disabled { opacity: 0.4; }
+body.retro #overlay { background: rgba(240,240,232,0.85); }
+body.retro #overlay h2, body.retro #overlay .sub { color: #000; }
+body.retro #overlay .newhigh { color: #000; font-style: italic; }
+body.retro #overlay button { color: #000; border-color: #000; }
+body.retro #overlay button:hover { background: rgba(0,0,0,0.1); }
+body.retro .red { color: #000; }
+body.retro .green { color: #000; }
+
+#macbar {
+  display: none;
+  flex-shrink: 0;
+}
+body.retro #macbar {
+  display: flex;
+  align-items: center;
+  height: 20px;
+  background: #fff;
+  border-bottom: 2px solid #000;
+}
+.mac-stripes {
+  flex: 1;
+  height: 16px;
+  background: repeating-linear-gradient(
+    transparent 0px, transparent 1px,
+    #000 1px, #000 2px,
+    transparent 2px, transparent 3px
+  );
+  margin: 0 4px;
+}
+.mac-title {
+  font-family: 'Chicago', 'Geneva', 'Courier New', monospace;
+  font-size: 12px;
+  font-weight: bold;
+  color: #000;
+  padding: 0 8px;
+  white-space: nowrap;
+  background: #fff;
+}
+body:not(.retro) #macbar { display: none; }
+</style>
+</head>
+<body>
+
+<div id="menu">
+  <h1>DALEKS</h1>
+  <div class="robots">🤖 🤖 🤖</div>
+  <div class="high-score" id="menuHigh"></div>
+  <button onclick="startGame()">NEW GAME</button>
+  <div class="rules">
+    <span>🧑</span> You — tap/click to move<br>
+    <span>🤖</span> Daleks — chase you every turn<br>
+    <span>💥</span> Scrap — destroyed Daleks<br>
+    <span>🪛</span> Sonic — destroys adjacent Daleks<br>
+    <span>⚡</span> Lure Daleks into each other!
+  </div>
+  <div class="high-score" id="menuAI" style="font-size:0.8rem"></div>
+  <button onclick="resetWeights()" style="font-size:0.8rem;padding:6px 16px;border-width:1px">Reset AI Brain</button>
+</div>
+
+<div id="game">
+  <div id="macbar">
+    <div class="mac-stripes"></div>
+    <div class="mac-title">Daleks</div>
+    <div class="mac-stripes"></div>
+  </div>
+  <div id="topbar">
+    <span id="scoreLabel">Score: 0</span>
+    <span id="levelLabel">Level 1</span>
+    <span id="highLabel">Hi: 0</span>
+    <span id="btnRetro" onclick="toggleRetro()" style="cursor:pointer">🖥</span>
+  </div>
+  <div id="grid-container">
+    <canvas id="canvas"></canvas>
+  </div>
+  <div id="statsbar">
+    <span id="statDaleks">🤖 0</span>
+    <span id="statScrap">💥 0</span>
+    <span id="statSafe">✅ 0</span>
+    <span id="statUnsafe">⛔ 0</span>
+    <span id="deathProb">☠ 0%</span>
+    <span id="statLearn" style="display:none">🧠 Gen 0 | Best: 0</span>
+  </div>
+  <div id="bottombar">
+    <button id="btnTeleport" onclick="doTeleport()">⚡ Teleport</button>
+
+    <button id="btnSonic" onclick="doSonic()">🪛 Sonic (1)</button>
+    <button id="btnLastStand" onclick="doLastStand()">🔥 Last Stand</button>
+    <button id="btnAutoplay" onclick="toggleAutoplay()">🤖 Auto</button>
+    <button id="btnLearn" onclick="toggleLearn()">🧠 Learn</button>
+  </div>
+</div>
+
+<div id="overlay">
+  <h2 id="overlayTitle"></h2>
+  <div class="sub" id="overlayScore"></div>
+  <div class="newhigh" id="overlayHigh" style="display:none">NEW HIGH SCORE!</div>
+  <div id="overlayButtons"></div>
+</div>
+
+<script>
+const COLS = 30, ROWS = 20;
+const EMOJI = { player: '🧑', dalek: '🤖', scrap: '💥', sonic: '🪛' };
+
+let state, canvas, ctx, cellSize, highScore, explosion = null;
+let retroMode = false;
+let autoplayActive = false;
+let autoplayTimer = null;
+
+// Learning AI weights
+const DEFAULT_WEIGHTS = {
+  destroyedW: 100,    // bonus per dalek destroyed this turn
+  destroyed2W: 60,    // bonus per dalek destroyed on turn 2 lookahead
+  destroyed3W: 35,    // bonus per dalek destroyed on turn 3 lookahead
+  remainingW: -5,     // penalty per remaining dalek
+  minDistClose: -50,  // penalty if nearest dalek <= 1
+  minDist2: 5,        // bonus if nearest dalek == 2
+  minDistMid: 15,     // bonus if nearest dalek 3-5
+  minDistFar: 8,      // bonus if nearest dalek > 5
+  escapeW: 8,         // bonus per escape route
+  centerW: -3,        // penalty for distance from center
+  futureCollW: 30,    // bonus per future collision
+  dupeAngleW: 20,     // bonus per duplicate approach angle
+  scrapLineW: 25,     // bonus per dalek with scrap in its path
+  sonicThreshold: 3,  // adjacent daleks needed to use sonic
+  sonicDesperateThreshold: 1, // adjacent daleks when cornered
+};
+
+let aiWeights = loadWeights();
+let bestWeights = {...aiWeights};
+let bestAIScore = +(localStorage.getItem('daleksBestAI') || 0);
+let aiGeneration = +(localStorage.getItem('daleksGeneration') || 0);
+let learningMode = false;
+
+function loadWeights() {
+  try {
+    const saved = localStorage.getItem('daleksWeights');
+    if (saved) return {...DEFAULT_WEIGHTS, ...JSON.parse(saved)};
+  } catch(e) {}
+  return {...DEFAULT_WEIGHTS};
+}
+
+function saveWeights(w, score, gen) {
+  localStorage.setItem('daleksWeights', JSON.stringify(w));
+  localStorage.setItem('daleksBestAI', score);
+  localStorage.setItem('daleksGeneration', gen);
+}
+
+function mutateWeights(w) {
+  const mutated = {...w};
+  const keys = Object.keys(mutated);
+  // Mutate 2-4 random weights
+  const numMutations = 2 + Math.floor(Math.random() * 3);
+  for (let i = 0; i < numMutations; i++) {
+    const k = keys[Math.floor(Math.random() * keys.length)];
+    const scale = Math.abs(mutated[k]) || 1;
+    mutated[k] += (Math.random() - 0.5) * scale * 0.4;
+  }
+  return mutated;
+}
+
+function resetWeights() {
+  aiWeights = {...DEFAULT_WEIGHTS};
+  bestWeights = {...DEFAULT_WEIGHTS};
+  bestAIScore = 0;
+  aiGeneration = 0;
+  saveWeights(aiWeights, 0, 0);
+}
+
+// 8x8 pixel art sprites for 1984 Mac style
+const SPRITES = {
+  player: [
+    '...11...',
+    '..1..1..',
+    '...11...',
+    '...11...',
+    '..1111..',
+    '.1.11.1.',
+    '...11...',
+    '..1..1..',
+  ],
+  dalek: [
+    '.111111.',
+    '1.1111.1',
+    '11111111',
+    '.11..11.',
+    '.111111.',
+    '..1111..',
+    '.111111.',
+    '11111111',
+  ],
+  scrap: [
+    '1......1',
+    '.1....1.',
+    '..1..1..',
+    '...11...',
+    '...11...',
+    '..1..1..',
+    '.1....1.',
+    '1......1',
+  ],
+  // Arrows for each direction: N, NE, E, SE, S, SW, W, NW
+  arrowN: [
+    '...11...',
+    '..1111..',
+    '.11..11.',
+    '...11...',
+    '...11...',
+    '........',
+    '........',
+    '........',
+  ],
+  arrowNE: [
+    '...11111',
+    '....1111',
+    '...1.11.',
+    '..1..1..',
+    '.1......',
+    '........',
+    '........',
+    '........',
+  ],
+  arrowE: [
+    '........',
+    '....1...',
+    '.....1..',
+    '111111..',
+    '111111..',
+    '.....1..',
+    '....1...',
+    '........',
+  ],
+  arrowSE: [
+    '........',
+    '........',
+    '........',
+    '.1......',
+    '..1..1..',
+    '...1.11.',
+    '....1111',
+    '...11111',
+  ],
+  arrowS: [
+    '........',
+    '........',
+    '........',
+    '...11...',
+    '...11...',
+    '.11..11.',
+    '..1111..',
+    '...11...',
+  ],
+  arrowSW: [
+    '........',
+    '........',
+    '........',
+    '......1.',
+    '..1..1..',
+    '.11.1...',
+    '1111....',
+    '11111...',
+  ],
+  arrowW: [
+    '........',
+    '...1....',
+    '..1.....',
+    '..111111',
+    '..111111',
+    '..1.....',
+    '...1....',
+    '........',
+  ],
+  arrowNW: [
+    '11111...',
+    '1111....',
+    '.11.1...',
+    '..1..1..',
+    '......1.',
+    '........',
+    '........',
+    '........',
+  ],
+};
+
+function drawSprite(sprite, cx, cy, size, fg) {
+  const px = size / 8;
+  const ox = cx - size / 2;
+  const oy = cy - size / 2;
+  ctx.fillStyle = fg;
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      if (sprite[r][c] === '1') {
+        ctx.fillRect(Math.floor(ox + c * px), Math.floor(oy + r * px), Math.ceil(px), Math.ceil(px));
+      }
+    }
+  }
+}
+
+function canMove(dx, dy) {
+  if (state.gameOver || state.levelComplete) return false;
+  const nx = state.px + dx, ny = state.py + dy;
+  if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) return false;
+  if (state.scrap.has(key(nx, ny))) return false;
+  if (state.daleks.has(key(nx, ny))) return false;
+  if (wouldDie(nx, ny)) return false;
+  return true;
+}
+
+function toggleRetro() {
+  retroMode = !retroMode;
+  document.body.classList.toggle('retro', retroMode);
+  render();
+}
+
+function key(x, y) { return x + ',' + y; }
+function parseKey(k) { const p = k.split(','); return [+p[0], +p[1]]; }
+
+function initState(level, score) {
+  const daleks = new Set();
+  const count = 5 + (level - 1) * 3;
+  const px = Math.floor(COLS / 2), py = Math.floor(ROWS / 2);
+  while (daleks.size < count) {
+    const x = Math.floor(Math.random() * COLS);
+    const y = Math.floor(Math.random() * ROWS);
+    if (x !== px || y !== py) daleks.add(key(x, y));
+  }
+  return {
+    px, py, daleks, scrap: new Set(),
+    score, level,
+
+    sonicUses: 1,
+    gameOver: false, levelComplete: false, lastStandActive: false
+  };
+}
+
+function startGame() {
+  highScore = +(localStorage.getItem('daleksHigh') || 0);
+  state = initState(1, 0);
+  document.getElementById('menu').style.display = 'none';
+  document.getElementById('game').style.display = 'flex';
+  hideOverlay();
+  setupCanvas();
+  render();
+}
+
+function setupCanvas() {
+  canvas = document.getElementById('canvas');
+  ctx = canvas.getContext('2d');
+  sizeCanvas();
+  window.addEventListener('resize', () => { sizeCanvas(); render(); });
+  canvas.addEventListener('click', onCanvasClick);
+  canvas.addEventListener('touchend', e => {
+    e.preventDefault();
+    const t = e.changedTouches[0];
+    const rect = canvas.getBoundingClientRect();
+    handleClick(t.clientX - rect.left, t.clientY - rect.top);
+  });
+}
+
+function sizeCanvas() {
+  const container = document.getElementById('grid-container');
+  const w = container.clientWidth - 4;
+  const h = container.clientHeight - 4;
+  cellSize = Math.floor(Math.min(w / COLS, h / ROWS));
+  canvas.width = cellSize * COLS;
+  canvas.height = cellSize * ROWS;
+  canvas.style.width = canvas.width + 'px';
+  canvas.style.height = canvas.height + 'px';
+}
+
+function render() {
+  if (!ctx) return;
+  const w = canvas.width, h = canvas.height;
+  const bg = retroMode ? '#f0f0e8' : '#0a0a0a';
+  const fg = retroMode ? '#000000' : '#00ff41';
+  const gridColor = retroMode ? 'rgba(0,0,0,0.15)' : 'rgba(0,255,65,0.18)';
+  const dotColor = retroMode ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.08)';
+
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, w, h);
+
+  // Grid lines
+  ctx.strokeStyle = gridColor;
+  ctx.lineWidth = 1;
+  for (let c = 0; c <= COLS; c++) {
+    ctx.beginPath(); ctx.moveTo(c * cellSize, 0); ctx.lineTo(c * cellSize, h); ctx.stroke();
+  }
+  for (let r = 0; r <= ROWS; r++) {
+    ctx.beginPath(); ctx.moveTo(0, r * cellSize); ctx.lineTo(w, r * cellSize); ctx.stroke();
+  }
+
+  // Dots for empty cells
+  ctx.fillStyle = dotColor;
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const k = key(c, r);
+      if (!(c === state.px && r === state.py) && !state.daleks.has(k) && !state.scrap.has(k)) {
+        ctx.beginPath();
+        ctx.arc(c * cellSize + cellSize / 2, r * cellSize + cellSize / 2, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  const spriteSize = cellSize * 0.85;
+
+  if (retroMode) {
+    // 1984 Mac pixel art
+    for (const k of state.scrap) {
+      const [x, y] = parseKey(k);
+      drawSprite(SPRITES.scrap, x * cellSize + cellSize / 2, y * cellSize + cellSize / 2, spriteSize, fg);
+    }
+    for (const k of state.daleks) {
+      const [x, y] = parseKey(k);
+      drawSprite(SPRITES.dalek, x * cellSize + cellSize / 2, y * cellSize + cellSize / 2, spriteSize, fg);
+    }
+    if (state.gameOver && !explosion) {
+      drawSprite(SPRITES.scrap, state.px * cellSize + cellSize / 2, state.py * cellSize + cellSize / 2, spriteSize, fg);
+    } else if (!state.gameOver) {
+      drawSprite(SPRITES.player, state.px * cellSize + cellSize / 2, state.py * cellSize + cellSize / 2, spriteSize, fg);
+      // Draw directional arrows for valid moves
+      const arrowColor = 'rgba(0,0,0,0.3)';
+      const arrowSize = cellSize * 0.5;
+      const dirs = [
+        { dx:0,  dy:-1, sprite: SPRITES.arrowN },
+        { dx:1,  dy:-1, sprite: SPRITES.arrowNE },
+        { dx:1,  dy:0,  sprite: SPRITES.arrowE },
+        { dx:1,  dy:1,  sprite: SPRITES.arrowSE },
+        { dx:0,  dy:1,  sprite: SPRITES.arrowS },
+        { dx:-1, dy:1,  sprite: SPRITES.arrowSW },
+        { dx:-1, dy:0,  sprite: SPRITES.arrowW },
+        { dx:-1, dy:-1, sprite: SPRITES.arrowNW },
+      ];
+      for (const d of dirs) {
+        if (canMove(d.dx, d.dy)) {
+          const ax = (state.px + d.dx) * cellSize + cellSize / 2;
+          const ay = (state.py + d.dy) * cellSize + cellSize / 2;
+          drawSprite(d.sprite, ax, ay, arrowSize, arrowColor);
+        }
+      }
+    }
+  } else {
+    // Emoji mode
+    const fontSize = Math.max(10, cellSize * 0.7);
+    ctx.font = `${fontSize}px serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    for (const k of state.scrap) {
+      const [x, y] = parseKey(k);
+      ctx.fillText(EMOJI.scrap, x * cellSize + cellSize / 2, y * cellSize + cellSize / 2 + 1);
+    }
+    for (const k of state.daleks) {
+      const [x, y] = parseKey(k);
+      ctx.fillText(EMOJI.dalek, x * cellSize + cellSize / 2, y * cellSize + cellSize / 2 + 1);
+    }
+    if (state.gameOver && !explosion) {
+      ctx.fillText('💥', state.px * cellSize + cellSize / 2, state.py * cellSize + cellSize / 2 + 1);
+    } else if (!state.gameOver) {
+      ctx.fillText(EMOJI.player, state.px * cellSize + cellSize / 2, state.py * cellSize + cellSize / 2 + 1);
+    }
+  }
+
+  // Explosion animation
+  if (explosion) {
+    const cx = explosion.x * cellSize + cellSize / 2;
+    const cy = explosion.y * cellSize + cellSize / 2;
+    const t = explosion.frame / explosion.totalFrames;
+    const maxRadius = cellSize * 2.5;
+
+    const radius = maxRadius * t;
+    const alpha = 1 - t;
+
+    if (retroMode) {
+      // B&W concentric rings
+      ctx.strokeStyle = `rgba(0,0,0,${alpha})`;
+      ctx.lineWidth = 2 * (1 - t);
+      ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx, cy, radius * 0.5, 0, Math.PI * 2); ctx.stroke();
+      if (t < 0.7) {
+        drawSprite(SPRITES.scrap, cx, cy, spriteSize * (1 + t), '#000');
+      }
+    } else {
+      // Expanding ring
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(255,100,0,${alpha})`;
+      ctx.lineWidth = 3 * (1 - t);
+      ctx.stroke();
+
+      // Inner glow
+      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius * 0.6);
+      grad.addColorStop(0, `rgba(255,200,50,${alpha * 0.8})`);
+      grad.addColorStop(0.5, `rgba(255,80,0,${alpha * 0.4})`);
+      grad.addColorStop(1, `rgba(255,0,0,0)`);
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Explosion emoji at center
+      if (t < 0.7) {
+        const eSize = Math.max(10, cellSize * 0.7 * (1 + t));
+        ctx.font = `${eSize}px serif`;
+        ctx.fillText('💥', cx, cy + 1);
+      }
+    }
+  }
+
+  updateUI();
+}
+
+function updateUI() {
+  document.getElementById('scoreLabel').textContent = 'Score: ' + state.score;
+  document.getElementById('levelLabel').textContent = 'Level ' + state.level;
+  document.getElementById('highLabel').textContent = 'Hi: ' + highScore;
+  document.getElementById('btnSonic').textContent = '🪛 Sonic (' + state.sonicUses + ')';
+  document.getElementById('btnSonic').disabled = state.sonicUses <= 0;
+  document.getElementById('btnLastStand').disabled = state.lastStandActive || autoplayActive;
+  document.getElementById('btnAutoplay').textContent = autoplayActive && !learningMode ? '⏹ Stop' : '🤖 Auto';
+  document.getElementById('btnAutoplay').style.borderColor = autoplayActive && !learningMode ? (retroMode ? '#000' : '#ff6644') : '';
+  document.getElementById('btnAutoplay').disabled = learningMode;
+  document.getElementById('btnLearn').textContent = learningMode ? '⏹ Stop Learning' : '🧠 Learn';
+  document.getElementById('btnLearn').style.borderColor = learningMode ? (retroMode ? '#000' : '#ff6644') : '';
+  const learnStat = document.getElementById('statLearn');
+  learnStat.style.display = learningMode || aiGeneration > 0 ? '' : 'none';
+  learnStat.textContent = '🧠 Gen ' + aiGeneration + ' | Best: ' + bestAIScore;
+  const totalCells = COLS * ROWS;
+  // Collect all dangerous cells: daleks, scrap, and cells daleks can reach
+  const dangerSet = new Set();
+  for (const k of state.daleks) dangerSet.add(k);
+  for (const k of state.scrap) dangerSet.add(k);
+  // Each dalek threatens its 8 neighbors + its own cell
+  for (const dk of state.daleks) {
+    const [bx, by] = parseKey(dk);
+    for (let ddx = -1; ddx <= 1; ddx++) {
+      for (let ddy = -1; ddy <= 1; ddy++) {
+        const nx = bx + ddx, ny = by + ddy;
+        if (nx >= 0 && nx < COLS && ny >= 0 && ny < ROWS) {
+          dangerSet.add(key(nx, ny));
+        }
+      }
+    }
+  }
+  const dangerCount = dangerSet.size;
+  const safeCells = totalCells - dangerCount - (dangerSet.has(key(state.px, state.py)) ? 0 : 1);
+  const pct = Math.round((dangerCount / totalCells) * 100);
+  document.getElementById('statDaleks').textContent = '🤖 ' + state.daleks.size;
+  document.getElementById('statScrap').textContent = '💥 ' + state.scrap.size;
+  document.getElementById('statSafe').textContent = '✅ ' + safeCells;
+  document.getElementById('statUnsafe').textContent = '⛔ ' + dangerCount;
+  document.getElementById('deathProb').textContent = '☠ ' + pct + '%';
+  document.getElementById('menuHigh').textContent = highScore > 0 ? 'High Score: ' + highScore : '';
+}
+
+function onCanvasClick(e) {
+  const rect = canvas.getBoundingClientRect();
+  handleClick(e.clientX - rect.left, e.clientY - rect.top);
+}
+
+function handleClick(mx, my) {
+  if (autoplayActive || learningMode) { stopAutoplay(); render(); return; }
+  if (state.gameOver || state.levelComplete || state.lastStandActive) return;
+  const col = Math.floor(mx / cellSize);
+  const row = Math.floor(my / cellSize);
+  if (col < 0 || col >= COLS || row < 0 || row >= ROWS) return;
+
+  let dx = Math.sign(col - state.px);
+  let dy = Math.sign(row - state.py);
+
+  if (dx === 0 && dy === 0) {
+    doWait();
+  } else {
+    doMove(dx, dy);
+  }
+}
+
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+function wouldDie(px, py) {
+  // Full simulation: move daleks, resolve collisions, check if player dies
+  const counts = {};
+  for (const dk of state.daleks) {
+    const [bx, by] = parseKey(dk);
+    const nk = key(bx + Math.sign(px - bx), by + Math.sign(py - by));
+    counts[nk] = (counts[nk] || 0) + 1;
+  }
+  const pk = key(px, py);
+  const simScrap = new Set(state.scrap);
+  let surviving = new Set();
+  for (const [pos, count] of Object.entries(counts)) {
+    if (simScrap.has(pos)) {
+      // daleks walk into scrap, they die
+    } else if (count > 1) {
+      // collision — all die, scrap created
+      simScrap.add(pos);
+    } else {
+      surviving.add(pos);
+    }
+  }
+  return surviving.has(pk) || simScrap.has(pk);
+}
+
+function doMove(dx, dy) {
+  if (state.gameOver || state.levelComplete) return;
+  const nx = state.px + dx, ny = state.py + dy;
+  if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) return;
+  if (state.scrap.has(key(nx, ny))) return;
+  if (state.daleks.has(key(nx, ny))) return;
+  if (wouldDie(nx, ny)) return;
+
+  state.px = nx; state.py = ny;
+  moveDaleks();
+  tryHaptic();
+}
+
+function doWait() {
+  if (state.gameOver || state.levelComplete) return;
+  if (wouldDie(state.px, state.py)) return;
+  moveDaleks();
+  tryHaptic();
+}
+
+function doTeleport() {
+  if (state.gameOver || state.levelComplete) return;
+  const x = Math.floor(Math.random() * COLS);
+  const y = Math.floor(Math.random() * ROWS);
+  const k = key(x, y);
+  if (state.daleks.has(k) || state.scrap.has(k)) {
+    state.px = x; state.py = y;
+    endGame(); return;
+  }
+  state.px = x; state.py = y;
+  moveDaleks();
+  tryHaptic();
+}
+
+
+function doSonic() {
+  if (state.gameOver || state.levelComplete || state.lastStandActive) return;
+  if (state.sonicUses <= 0) return;
+  state.sonicUses--;
+  // Destroy all Daleks adjacent to the player (8 surrounding cells)
+  let destroyed = 0;
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      if (dx === 0 && dy === 0) continue;
+      const k = key(state.px + dx, state.py + dy);
+      if (state.daleks.has(k)) {
+        state.daleks.delete(k);
+        destroyed++;
+      }
+    }
+  }
+  state.score += destroyed * 10;
+  if (state.daleks.size === 0) {
+    state.levelComplete = true;
+    updateHighScore();
+    render();
+    showLevelComplete();
+    return;
+  }
+  moveDaleks();
+  tryHaptic();
+}
+
+function dalekAdjacentToPlayer() {
+  for (const dk of state.daleks) {
+    const [bx, by] = parseKey(dk);
+    if (Math.abs(bx - state.px) <= 1 && Math.abs(by - state.py) <= 1) return true;
+  }
+  return false;
+}
+
+function doLastStand() {
+  if (state.gameOver || state.levelComplete || state.lastStandActive) return;
+  state.lastStandActive = true;
+  runLastStand();
+}
+
+function runLastStand() {
+  if (!state.lastStandActive || state.gameOver || state.levelComplete) {
+    state.lastStandActive = false;
+    render();
+    return;
+  }
+  // Stop if any Dalek is already adjacent — one step away from killing us
+  if (dalekAdjacentToPlayer()) {
+    state.lastStandActive = false;
+    render();
+    return;
+  }
+  moveDaleks();
+  if (!state.gameOver && !state.levelComplete) {
+    // Check again after daleks moved — stop if one is now adjacent
+    if (dalekAdjacentToPlayer()) {
+      state.lastStandActive = false;
+      render();
+      return;
+    }
+    setTimeout(runLastStand, 120);
+  } else {
+    state.lastStandActive = false;
+  }
+}
+
+function moveDaleks() {
+  const newPositions = [];
+  for (const dk of state.daleks) {
+    const [bx, by] = parseKey(dk);
+    const nx = bx + Math.sign(state.px - bx);
+    const ny = by + Math.sign(state.py - by);
+    newPositions.push(key(nx, ny));
+  }
+
+  // Count positions
+  const counts = {};
+  for (const p of newPositions) counts[p] = (counts[p] || 0) + 1;
+
+  const surviving = new Set();
+  let destroyed = 0;
+
+  for (const [pos, count] of Object.entries(counts)) {
+    if (state.scrap.has(pos)) {
+      destroyed += count;
+    } else if (count > 1) {
+      destroyed += count;
+      state.scrap.add(pos);
+    } else {
+      surviving.add(pos);
+    }
+  }
+
+  state.daleks = surviving;
+  state.score += destroyed * 10;
+
+  const pk = key(state.px, state.py);
+  if (surviving.has(pk) || state.scrap.has(pk)) {
+    endGame(); return;
+  }
+
+  if (surviving.size === 0) {
+    state.levelComplete = true;
+    updateHighScore();
+    showLevelComplete();
+  }
+  render();
+}
+
+function toggleAutoplay() {
+  if (autoplayActive) {
+    stopAutoplay();
+  } else {
+    autoplayActive = true;
+    runAutoplay();
+  }
+  render();
+}
+
+function stopAutoplay() {
+  autoplayActive = false;
+  learningMode = false;
+  if (autoplayTimer) { clearTimeout(autoplayTimer); autoplayTimer = null; }
+}
+
+function toggleLearn() {
+  if (learningMode) {
+    stopAutoplay();
+    render();
+  } else {
+    learningMode = true;
+    autoplayActive = true;
+    aiWeights = mutateWeights(bestWeights);
+    state = initState(1, 0);
+    render();
+    autoplayTimer = setTimeout(runAutoplay, learningMode ? 20 : 300);
+  }
+}
+
+function runAutoplay() {
+  if (!autoplayActive || state.gameOver || state.levelComplete) {
+    stopAutoplay();
+    return;
+  }
+
+  // Smart AI: simulate each move, evaluate board state after daleks respond
+  const allDirs = [
+    {dx:-1,dy:-1},{dx:0,dy:-1},{dx:1,dy:-1},
+    {dx:-1,dy:0},{dx:0,dy:0},{dx:1,dy:0},
+    {dx:-1,dy:1},{dx:0,dy:1},{dx:1,dy:1},
+  ];
+
+  // Simulate a move and return the resulting board state
+  function simMove(px, py, daleks, scrap) {
+    const counts = {};
+    for (const dk of daleks) {
+      const [bx, by] = parseKey(dk);
+      const nk = key(bx + Math.sign(px - bx), by + Math.sign(py - by));
+      counts[nk] = (counts[nk] || 0) + 1;
+    }
+    const newScrap = new Set(scrap);
+    const surviving = new Set();
+    let destroyed = 0;
+    for (const [pos, count] of Object.entries(counts)) {
+      if (newScrap.has(pos)) {
+        destroyed += count;
+      } else if (count > 1) {
+        destroyed += count;
+        newScrap.add(pos);
+      } else {
+        surviving.add(pos);
+      }
+    }
+    return { daleks: surviving, scrap: newScrap, destroyed };
+  }
+
+  // Count valid moves from a position given a board state
+  function countEscapes(px, py, daleks, scrap) {
+    let count = 0;
+    for (const d of allDirs) {
+      const nx = px + d.dx, ny = py + d.dy;
+      if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) continue;
+      if (scrap.has(key(nx, ny)) || daleks.has(key(nx, ny))) continue;
+      // Quick death check
+      const sim = simMove(nx, ny, daleks, scrap);
+      const pk = key(nx, ny);
+      if (!sim.daleks.has(pk) && !sim.scrap.has(pk)) count++;
+    }
+    return count;
+  }
+
+  const validMoves = [];
+  for (const d of allDirs) {
+    const nx = state.px + d.dx, ny = state.py + d.dy;
+    if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) continue;
+    if (state.scrap.has(key(nx, ny))) continue;
+    if (state.daleks.has(key(nx, ny))) continue;
+    if (wouldDie(nx, ny)) continue;
+    validMoves.push(d);
+  }
+
+  // Use sonic when 3+ daleks are adjacent
+  if (state.sonicUses > 0) {
+    let adjDaleks = 0;
+    for (const dk of state.daleks) {
+      const [bx, by] = parseKey(dk);
+      if (Math.abs(bx - state.px) <= 1 && Math.abs(by - state.py) <= 1) adjDaleks++;
+    }
+    const st = Math.round(aiWeights.sonicThreshold);
+    const sdt = Math.round(aiWeights.sonicDesperateThreshold);
+    if (adjDaleks >= st || (validMoves.length <= 1 && adjDaleks >= sdt)) {
+      doSonic();
+    } else {
+      aiPickMove(validMoves, allDirs, simMove, countEscapes);
+    }
+  } else {
+    aiPickMove(validMoves, allDirs, simMove, countEscapes);
+  }
+
+  function aiPickMove(validMoves, allDirs, simMove, countEscapes) {
+    if (validMoves.length === 0) {
+      doTeleport(); return;
+    }
+
+    let bestScore = -Infinity;
+    let bestMove = validMoves[0];
+
+    for (const d of validMoves) {
+      const nx = state.px + d.dx, ny = state.py + d.dy;
+      const sim = simMove(nx, ny, state.daleks, state.scrap);
+
+      const W = aiWeights;
+      let score = sim.destroyed * W.destroyedW;
+      score += sim.daleks.size * W.remainingW;
+
+      // Turn 2 lookahead: simulate waiting at this position
+      let sim2destroyed = 0;
+      let sim3destroyed = 0;
+      let sim2daleks = sim.daleks;
+      let sim2scrap = sim.scrap;
+      if (sim.daleks.size > 0) {
+        const s2 = simMove(nx, ny, sim.daleks, sim.scrap);
+        sim2destroyed = s2.destroyed;
+        sim2daleks = s2.daleks;
+        sim2scrap = s2.scrap;
+        score += s2.destroyed * W.destroyed2W;
+        // Turn 3 lookahead
+        if (s2.daleks.size > 0) {
+          const s3 = simMove(nx, ny, s2.daleks, s2.scrap);
+          sim3destroyed = s3.destroyed;
+          score += s3.destroyed * W.destroyed3W;
+        }
+      }
+
+      let minDist = Infinity;
+      for (const dk of sim.daleks) {
+        const [bx, by] = parseKey(dk);
+        const dist = Math.max(Math.abs(nx - bx), Math.abs(ny - by));
+        if (dist < minDist) minDist = dist;
+      }
+      if (sim.daleks.size > 0) {
+        if (minDist <= 1) score += W.minDistClose;
+        else if (minDist === 2) score += W.minDist2;
+        else if (minDist <= 5) score += W.minDistMid;
+        else score += W.minDistFar;
+      }
+
+      const escapes = countEscapes(nx, ny, sim.daleks, sim.scrap);
+      score += escapes * W.escapeW;
+
+      const cx = Math.abs(nx - COLS / 2) / (COLS / 2);
+      const cy = Math.abs(ny - ROWS / 2) / (ROWS / 2);
+      score += (cx + cy) * W.centerW;
+
+      // Count daleks with scrap in their path toward the player
+      // (they'll walk into it and die in coming turns)
+      if (sim.daleks.size > 0) {
+        let scrapTraps = 0;
+        const futureCounts = {};
+        for (const dk of sim.daleks) {
+          const [bx, by] = parseKey(dk);
+          const fk = key(bx + Math.sign(nx - bx), by + Math.sign(ny - by));
+          futureCounts[fk] = (futureCounts[fk] || 0) + 1;
+          // Check if scrap lies on the line between dalek and player
+          const sdx = Math.sign(nx - bx), sdy = Math.sign(ny - by);
+          const steps = Math.max(Math.abs(nx - bx), Math.abs(ny - by));
+          for (let s = 1; s < steps; s++) {
+            if (sim.scrap.has(key(bx + sdx * s, by + sdy * s))) {
+              scrapTraps++;
+              break;
+            }
+          }
+        }
+        score += scrapTraps * W.scrapLineW;
+
+        let futureCollisions = 0;
+        for (const c of Object.values(futureCounts)) {
+          if (c > 1) futureCollisions += c;
+        }
+        score += futureCollisions * W.futureCollW;
+      }
+
+      if (sim.daleks.size > 1) {
+        const angles = new Set();
+        for (const dk of sim.daleks) {
+          const [bx, by] = parseKey(dk);
+          const a = Math.sign(nx - bx) + ',' + Math.sign(ny - by);
+          angles.add(a);
+        }
+        const duplicates = sim.daleks.size - angles.size;
+        score += duplicates * W.dupeAngleW;
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestMove = d;
+      }
+    }
+
+    if (bestMove.dx === 0 && bestMove.dy === 0) {
+      doWait();
+    } else {
+      doMove(bestMove.dx, bestMove.dy);
+    }
+  }
+
+  if (!state.gameOver && !state.levelComplete) {
+    autoplayTimer = setTimeout(runAutoplay, learningMode ? 20 : 200);
+  } else if (state.levelComplete) {
+    // Auto-continue to next level
+    autoplayTimer = setTimeout(() => {
+      hideOverlay();
+      state = initState(state.level + 1, state.score);
+      render();
+      autoplayTimer = setTimeout(runAutoplay, learningMode ? 50 : 500);
+    }, learningMode ? 100 : 1000);
+  } else if (!learningMode) {
+    stopAutoplay();
+  }
+}
+
+function endGame() {
+  state.gameOver = true;
+  state.lastStandActive = false;
+  const wasLearning = learningMode;
+  autoplayActive = false;
+  if (autoplayTimer) { clearTimeout(autoplayTimer); autoplayTimer = null; }
+  updateHighScore();
+
+  // Learning: evaluate this run's weights
+  if (wasLearning) {
+    aiGeneration++;
+    if (state.score > bestAIScore) {
+      // This mutation was better — keep it
+      bestAIScore = state.score;
+      bestWeights = {...aiWeights};
+      saveWeights(aiWeights, bestAIScore, aiGeneration);
+    } else {
+      // Revert to best and try a new mutation
+      aiWeights = {...bestWeights};
+    }
+    // Mutate for next run and auto-restart
+    aiWeights = mutateWeights(bestWeights);
+    playExplosion(state.px, state.py, () => {
+      if (!learningMode) return; // user stopped learning during explosion
+      state = initState(1, 0);
+      autoplayActive = true;
+      render();
+      autoplayTimer = setTimeout(runAutoplay, 20);
+    });
+    return;
+  }
+
+  playExplosion(state.px, state.py, () => {
+    showGameOver();
+  });
+}
+
+function playExplosion(x, y, callback) {
+  explosion = { x, y, frame: 0, totalFrames: 30 };
+  function tick() {
+    explosion.frame++;
+    render();
+    if (explosion.frame < explosion.totalFrames) {
+      requestAnimationFrame(tick);
+    } else {
+      explosion = null;
+      render();
+      if (callback) callback();
+    }
+  }
+  render();
+  requestAnimationFrame(tick);
+}
+
+function updateHighScore() {
+  if (state.score > highScore) {
+    highScore = state.score;
+    localStorage.setItem('daleksHigh', highScore);
+  }
+}
+
+function showGameOver() {
+  const o = document.getElementById('overlay');
+  document.getElementById('overlayTitle').textContent = 'GAME OVER';
+  document.getElementById('overlayTitle').className = 'red';
+  document.getElementById('overlayScore').textContent = 'Score: ' + state.score;
+  const isNew = state.score > 0 && state.score >= highScore;
+  document.getElementById('overlayHigh').style.display = isNew ? 'block' : 'none';
+  document.getElementById('overlayButtons').innerHTML =
+    '<button onclick="restartGame()">Play Again</button>' +
+    '<button onclick="goToMenu()">Menu</button>';
+  o.classList.add('show');
+}
+
+function showLevelComplete() {
+  const o = document.getElementById('overlay');
+  document.getElementById('overlayTitle').textContent = 'LEVEL ' + state.level + ' COMPLETE!';
+  document.getElementById('overlayTitle').className = 'green';
+  document.getElementById('overlayScore').textContent = 'Score: ' + state.score;
+  document.getElementById('overlayHigh').style.display = 'none';
+  document.getElementById('overlayButtons').innerHTML =
+    '<button onclick="nextLevel()">Next Level →</button>';
+  o.classList.add('show');
+}
+
+function hideOverlay() {
+  document.getElementById('overlay').classList.remove('show');
+}
+
+function restartGame() {
+  stopAutoplay();
+  hideOverlay();
+  explosion = null;
+  state = initState(1, 0);
+  render();
+}
+
+function nextLevel() {
+  hideOverlay();
+  state = initState(state.level + 1, state.score);
+  render();
+}
+
+function goToMenu() {
+  stopAutoplay();
+  hideOverlay();
+  document.getElementById('game').style.display = 'none';
+  document.getElementById('menu').style.display = 'flex';
+  updateUI();
+}
+
+function tryHaptic() {
+  if (navigator.vibrate) navigator.vibrate(10);
+}
+
+// Keyboard support
+document.addEventListener('keydown', e => {
+  if (state && !state.gameOver && !state.levelComplete && !state.lastStandActive) {
+    const map = {
+      'ArrowUp': [0,-1], 'ArrowDown': [0,1], 'ArrowLeft': [-1,0], 'ArrowRight': [1,0],
+      'ArrowUp+ArrowLeft': [-1,-1], 'ArrowUp+ArrowRight': [1,-1],
+      'ArrowDown+ArrowLeft': [-1,1], 'ArrowDown+ArrowRight': [1,1],
+      // Numpad / vim-style
+      'q': [-1,-1], 'w': [0,-1], 'e': [1,-1],
+      'a': [-1,0],  's': [0,0],  'd': [1,0],
+      'y': [-1,1],  'x': [0,1],  'c': [1,1],
+      't': 'teleport', 'r': 'sonic', 'l': 'laststand',
+      ' ': [0,0],
+    };
+    const k = e.key.toLowerCase();
+    const action = map[k];
+    if (action === 'teleport') { doTeleport(); e.preventDefault(); }
+
+    else if (action === 'sonic') { doSonic(); e.preventDefault(); }
+    else if (action === 'laststand') { doLastStand(); e.preventDefault(); }
+    else if (Array.isArray(action)) {
+      const [dx, dy] = action;
+      if (dx === 0 && dy === 0) doWait(); else doMove(dx, dy);
+      e.preventDefault();
+    }
+  }
+});
+
+// Init menu
+highScore = +(localStorage.getItem('daleksHigh') || 0);
+document.getElementById('menuHigh').textContent = highScore > 0 ? 'High Score: ' + highScore : '';
+document.getElementById('menuAI').textContent = aiGeneration > 0 ? '🧠 AI: Gen ' + aiGeneration + ' | Best: ' + bestAIScore : '';
+</script>
+</body>
+</html>
