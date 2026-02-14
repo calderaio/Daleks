@@ -1044,7 +1044,7 @@ function toggleAutoplay() {
   if (autoplayActive) {
     stopAutoplay();
   } else {
-    aiWeights = {...population[0].w}; // use best learned weights
+    // Deep rollout AI — no weights needed
     autoplayActive = true;
     runAutoplay();
   }
@@ -1100,85 +1100,218 @@ function updateFastButton() {
   btn.style.background = learnFast ? 'rgba(255,221,0,0.25)' : '';
 }
 
+// ─── Deep Rollout AI ───
+
+const ALL_DIRS = [
+  {dx:-1,dy:-1},{dx:0,dy:-1},{dx:1,dy:-1},
+  {dx:-1,dy:0},{dx:0,dy:0},{dx:1,dy:0},
+  {dx:-1,dy:1},{dx:0,dy:1},{dx:1,dy:1},
+];
+
+// Simulate daleks moving toward player, resolve collisions
+function simStep(px, py, daleks, scrap) {
+  const counts = {};
+  for (const dk of daleks) {
+    const [bx, by] = parseKey(dk);
+    const nk = key(bx + Math.sign(px - bx), by + Math.sign(py - by));
+    counts[nk] = (counts[nk] || 0) + 1;
+  }
+  const newScrap = new Set(scrap);
+  const surviving = new Set();
+  let destroyed = 0;
+  for (const [pos, count] of Object.entries(counts)) {
+    if (newScrap.has(pos)) {
+      destroyed += count;
+    } else if (count > 1) {
+      destroyed += count;
+      newScrap.add(pos);
+    } else {
+      surviving.add(pos);
+    }
+  }
+  return { daleks: surviving, scrap: newScrap, destroyed };
+}
+
+// Check if player would die at (px,py) after daleks move
+function simWouldDie(px, py, daleks, scrap) {
+  const sim = simStep(px, py, daleks, scrap);
+  const pk = key(px, py);
+  return sim.daleks.has(pk) || sim.scrap.has(pk);
+}
+
+// Get valid moves from a position
+function getValidMoves(px, py, daleks, scrap) {
+  const moves = [];
+  for (const d of ALL_DIRS) {
+    const nx = px + d.dx, ny = py + d.dy;
+    if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) continue;
+    const nk = key(nx, ny);
+    if (scrap.has(nk) || daleks.has(nk)) continue;
+    if (simWouldDie(nx, ny, daleks, scrap)) continue;
+    moves.push(d);
+  }
+  return moves;
+}
+
+// Quick heuristic score for a board state (used at leaf nodes)
+function quickEval(px, py, daleks, scrap, destroyed) {
+  let score = destroyed * 100;
+  if (daleks.size === 0) return score + 10000; // level complete!
+
+  // Escape routes
+  const escapes = getValidMoves(px, py, daleks, scrap).length;
+  score += escapes * 15;
+  if (escapes === 0) score -= 5000; // forced teleport = very bad
+
+  // Prefer positions where daleks share approach angles (future collisions)
+  const angles = {};
+  for (const dk of daleks) {
+    const [bx, by] = parseKey(dk);
+    const a = Math.sign(px - bx) + ',' + Math.sign(py - by);
+    angles[a] = (angles[a] || 0) + 1;
+  }
+  for (const c of Object.values(angles)) {
+    if (c > 1) score += c * 25;
+  }
+
+  // Daleks with scrap in their path
+  for (const dk of daleks) {
+    const [bx, by] = parseKey(dk);
+    const sdx = Math.sign(px - bx), sdy = Math.sign(py - by);
+    const steps = Math.max(Math.abs(px - bx), Math.abs(py - by));
+    for (let s = 1; s < steps; s++) {
+      if (scrap.has(key(bx + sdx * s, by + sdy * s))) {
+        score += 20;
+        break;
+      }
+    }
+  }
+
+  return score;
+}
+
+// Deep rollout: simulate N turns of greedy play, return total score
+// BEAM_WIDTH best positions are kept at each depth
+const ROLLOUT_DEPTH = 15;
+const BEAM_WIDTH = 4;
+
+function rollout(startPx, startPy, startDaleks, startScrap) {
+  // Beam: array of {px, py, daleks, scrap, totalDestroyed, needsTeleport}
+  let beam = [{
+    px: startPx, py: startPy,
+    daleks: startDaleks, scrap: startScrap,
+    totalDestroyed: 0, needsTeleport: false,
+  }];
+
+  for (let depth = 0; depth < ROLLOUT_DEPTH; depth++) {
+    const candidates = [];
+
+    for (const node of beam) {
+      if (node.daleks.size === 0 || node.needsTeleport) {
+        candidates.push(node); // already terminal
+        continue;
+      }
+
+      const moves = getValidMoves(node.px, node.py, node.daleks, node.scrap);
+
+      if (moves.length === 0) {
+        // No valid moves — would need teleport
+        candidates.push({...node, needsTeleport: true});
+        continue;
+      }
+
+      for (const d of moves) {
+        const nx = node.px + d.dx, ny = node.py + d.dy;
+        const sim = simStep(nx, ny, node.daleks, node.scrap);
+        candidates.push({
+          px: nx, py: ny,
+          daleks: sim.daleks, scrap: sim.scrap,
+          totalDestroyed: node.totalDestroyed + sim.destroyed,
+          needsTeleport: false,
+        });
+      }
+    }
+
+    // Score and keep top BEAM_WIDTH
+    candidates.sort((a, b) => {
+      // Paths that don't need teleport always beat paths that do
+      if (a.needsTeleport !== b.needsTeleport) return a.needsTeleport ? 1 : -1;
+      // Level-complete paths win
+      if ((a.daleks.size === 0) !== (b.daleks.size === 0)) return a.daleks.size === 0 ? -1 : 1;
+      // Otherwise: most destroyed + best position
+      const sa = quickEval(a.px, a.py, a.daleks, a.scrap, a.totalDestroyed);
+      const sb = quickEval(b.px, b.py, b.daleks, b.scrap, b.totalDestroyed);
+      return sb - sa;
+    });
+
+    beam = candidates.slice(0, BEAM_WIDTH);
+  }
+
+  // Return best terminal state
+  const best = beam[0];
+  return {
+    destroyed: best.totalDestroyed,
+    needsTeleport: best.needsTeleport,
+    levelComplete: best.daleks.size === 0,
+    escapes: best.daleks.size > 0 ? getValidMoves(best.px, best.py, best.daleks, best.scrap).length : 9,
+  };
+}
+
 function runAutoplay() {
   if (!autoplayActive) return;
   if (state.gameOver || state.levelComplete) return;
 
-  // Break stalemate: if no kills in 15+ turns, teleport
-  if (state.staleTurns >= 15) {
-    state.staleTurns = 0;
-    doTeleport();
-    if (learnFast) return; // batch loop handles it
-    if (!state.gameOver && !state.levelComplete) {
-      autoplayTimer = setTimeout(runAutoplay, learningMode ? 20 : 200);
-    } else if (state.levelComplete) {
-      autoplayTimer = setTimeout(() => {
-        hideOverlay();
-        state = initState(state.level + 1, state.score);
-        render();
-        autoplayTimer = setTimeout(runAutoplay, learningMode ? 50 : 500);
-      }, learningMode ? 100 : 1000);
-    }
-    return;
-  }
+  // Get valid moves
+  const validMoves = getValidMoves(state.px, state.py, state.daleks, state.scrap);
 
-  // Smart AI: simulate each move, evaluate board state after daleks respond
-  const allDirs = [
-    {dx:-1,dy:-1},{dx:0,dy:-1},{dx:1,dy:-1},
-    {dx:-1,dy:0},{dx:0,dy:0},{dx:1,dy:0},
-    {dx:-1,dy:1},{dx:0,dy:1},{dx:1,dy:1},
-  ];
-
-  // Simulate a move and return the resulting board state
-  function simMove(px, py, daleks, scrap) {
-    const counts = {};
-    for (const dk of daleks) {
+  // Evaluate sonic option
+  let sonicScore = -Infinity;
+  let sonicBetter = false;
+  if (state.sonicUses > 0) {
+    let adjDaleks = 0;
+    const postSonicDaleks = new Set();
+    for (const dk of state.daleks) {
       const [bx, by] = parseKey(dk);
-      const nk = key(bx + Math.sign(px - bx), by + Math.sign(py - by));
-      counts[nk] = (counts[nk] || 0) + 1;
-    }
-    const newScrap = new Set(scrap);
-    const surviving = new Set();
-    let destroyed = 0;
-    for (const [pos, count] of Object.entries(counts)) {
-      if (newScrap.has(pos)) {
-        destroyed += count;
-      } else if (count > 1) {
-        destroyed += count;
-        newScrap.add(pos);
+      if (Math.abs(bx - state.px) <= 1 && Math.abs(by - state.py) <= 1) {
+        adjDaleks++;
       } else {
-        surviving.add(pos);
+        postSonicDaleks.add(dk);
       }
     }
-    return { daleks: surviving, scrap: newScrap, destroyed };
-  }
-
-  // Count valid moves from a position given a board state
-  function countEscapes(px, py, daleks, scrap) {
-    let count = 0;
-    for (const d of allDirs) {
-      const nx = px + d.dx, ny = py + d.dy;
-      if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) continue;
-      if (scrap.has(key(nx, ny)) || daleks.has(key(nx, ny))) continue;
-      // Quick death check
-      const sim = simMove(nx, ny, daleks, scrap);
-      const pk = key(nx, ny);
-      if (!sim.daleks.has(pk) && !sim.scrap.has(pk)) count++;
+    if (adjDaleks > 0) {
+      // Sonic clears level?
+      if (postSonicDaleks.size === 0) {
+        sonicScore = 100000;
+        sonicBetter = true;
+      } else if (validMoves.length <= 1) {
+        // Cornered — use sonic to escape
+        sonicScore = 50000;
+        sonicBetter = true;
+      } else if (adjDaleks >= 3) {
+        // Big cluster — always worth it
+        sonicScore = 40000;
+        sonicBetter = true;
+      } else {
+        // Check if waiting would catch more
+        let futureAdj = 0;
+        for (const dk of state.daleks) {
+          const [bx, by] = parseKey(dk);
+          const dist = Math.max(Math.abs(bx - state.px), Math.abs(by - state.py));
+          if (dist === 2) futureAdj++;
+        }
+        if (futureAdj <= adjDaleks || validMoves.length <= 2) {
+          // Do rollout after sonic to see if it's worth it
+          const simAfter = simStep(state.px, state.py, postSonicDaleks, state.scrap);
+          const r = rollout(state.px, state.py, simAfter.daleks, simAfter.scrap);
+          sonicScore = (adjDaleks + simAfter.destroyed) * 100 + r.destroyed * 80;
+          if (r.needsTeleport) sonicScore -= 50000;
+        }
+      }
     }
-    return count;
   }
 
-  const validMoves = [];
-  for (const d of allDirs) {
-    const nx = state.px + d.dx, ny = state.py + d.dy;
-    if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) continue;
-    if (state.scrap.has(key(nx, ny))) continue;
-    if (state.daleks.has(key(nx, ny))) continue;
-    if (wouldDie(nx, ny)) continue;
-    validMoves.push(d);
-  }
-
-  if (validMoves.length === 0 && state.sonicUses <= 0) {
+  // No valid moves and no sonic — must teleport
+  if (validMoves.length === 0 && !sonicBetter) {
     doTeleport();
     if (!state.gameOver && !state.levelComplete && !learnFast) {
       autoplayTimer = setTimeout(runAutoplay, learningMode ? 20 : 200);
@@ -1186,166 +1319,36 @@ function runAutoplay() {
     return;
   }
 
+  // Evaluate each move with deep rollout
   let bestScore = -Infinity;
   let bestMove = validMoves.length > 0 ? validMoves[0] : null;
-  let bestIsSonic = false;
 
-  // Evaluate sonic as an option
-  if (state.sonicUses > 0) {
-    // Count adjacent daleks that sonic would kill
-    let adjDaleks = 0;
-    for (const dk of state.daleks) {
-      const [bx, by] = parseKey(dk);
-      if (Math.abs(bx - state.px) <= 1 && Math.abs(by - state.py) <= 1) adjDaleks++;
+  for (const d of validMoves) {
+    const nx = state.px + d.dx, ny = state.py + d.dy;
+    const sim = simStep(nx, ny, state.daleks, state.scrap);
+
+    if (sim.daleks.size === 0) {
+      // This move clears the level — take it immediately
+      bestMove = d;
+      bestScore = Infinity;
+      break;
     }
 
-    if (adjDaleks > 0) {
-      // Simulate: after sonic, daleks move
-      const postSonicDaleks = new Set();
-      for (const dk of state.daleks) {
-        const [bx, by] = parseKey(dk);
-        if (Math.abs(bx - state.px) <= 1 && Math.abs(by - state.py) <= 1) continue;
-        postSonicDaleks.add(dk);
-      }
-      const simAfterSonic = simMove(state.px, state.py, postSonicDaleks, state.scrap);
+    const r = rollout(nx, ny, sim.daleks, sim.scrap);
 
-      let sonicScore = adjDaleks * aiWeights.destroyedW;
-      sonicScore += simAfterSonic.destroyed * aiWeights.destroyedW * 0.5;
-      // Huge bonus if sonic would clear the level
-      if (postSonicDaleks.size === 0) sonicScore += 500;
-      // Bonus if cornered — sonic is the escape
-      if (validMoves.length <= 1) sonicScore += 200;
-      // Penalize using sonic on just 1 dalek (save it for clusters)
-      if (adjDaleks === 1 && validMoves.length > 2 && postSonicDaleks.size > 2) sonicScore -= 150;
+    let score = (sim.destroyed + r.destroyed) * 100;
+    if (r.needsTeleport) score -= 50000; // huge penalty for needing teleport
+    if (r.levelComplete) score += 10000;
+    score += r.escapes * 10;
 
-      // Check: would MORE daleks be adjacent next turn if we wait?
-      // Count how many daleks are 2 steps away (will be adjacent next turn)
-      let futureAdj = 0;
-      for (const dk of state.daleks) {
-        const [bx, by] = parseKey(dk);
-        const dist = Math.max(Math.abs(bx - state.px), Math.abs(by - state.py));
-        if (dist === 2) futureAdj++;
-      }
-      // If waiting would catch more daleks and we can safely wait, penalize using now
-      if (futureAdj > adjDaleks && validMoves.length > 2) {
-        sonicScore -= (futureAdj - adjDaleks) * 40;
-      }
-
-      if (sonicScore > bestScore) {
-        bestScore = sonicScore;
-        bestIsSonic = true;
-      }
+    if (score > bestScore) {
+      bestScore = score;
+      bestMove = d;
     }
   }
 
-    for (const d of validMoves) {
-      const nx = state.px + d.dx, ny = state.py + d.dy;
-      const sim = simMove(nx, ny, state.daleks, state.scrap);
-
-      const W = aiWeights;
-      let score = sim.destroyed * W.destroyedW;
-      score += sim.daleks.size * W.remainingW;
-
-      // Turn 2 lookahead: simulate waiting at this position
-      let sim2destroyed = 0;
-      let sim3destroyed = 0;
-      let sim2daleks = sim.daleks;
-      let sim2scrap = sim.scrap;
-      if (sim.daleks.size > 0) {
-        const s2 = simMove(nx, ny, sim.daleks, sim.scrap);
-        sim2destroyed = s2.destroyed;
-        sim2daleks = s2.daleks;
-        sim2scrap = s2.scrap;
-        score += s2.destroyed * W.destroyed2W;
-        // Turn 3 lookahead
-        if (s2.daleks.size > 0) {
-          const s3 = simMove(nx, ny, s2.daleks, s2.scrap);
-          sim3destroyed = s3.destroyed;
-          score += s3.destroyed * W.destroyed3W;
-        }
-      }
-
-      let minDist = Infinity;
-      for (const dk of sim.daleks) {
-        const [bx, by] = parseKey(dk);
-        const dist = Math.max(Math.abs(nx - bx), Math.abs(ny - by));
-        if (dist < minDist) minDist = dist;
-      }
-      if (sim.daleks.size > 0) {
-        if (minDist <= 1) score += W.minDistClose;
-        else if (minDist === 2) score += W.minDist2;
-        else if (minDist <= 5) score += W.minDistMid;
-        else score += W.minDistFar;
-      }
-
-      const escapes = countEscapes(nx, ny, sim.daleks, sim.scrap);
-      score += escapes * W.escapeW;
-
-      const cx = Math.abs(nx - COLS / 2) / (COLS / 2);
-      const cy = Math.abs(ny - ROWS / 2) / (ROWS / 2);
-      score += (cx + cy) * W.centerW;
-
-      // Count daleks with scrap in their path toward the player
-      // (they'll walk into it and die in coming turns)
-      if (sim.daleks.size > 0) {
-        let scrapTraps = 0;
-        const futureCounts = {};
-        for (const dk of sim.daleks) {
-          const [bx, by] = parseKey(dk);
-          const fk = key(bx + Math.sign(nx - bx), by + Math.sign(ny - by));
-          futureCounts[fk] = (futureCounts[fk] || 0) + 1;
-          // Check if scrap lies on the line between dalek and player
-          const sdx = Math.sign(nx - bx), sdy = Math.sign(ny - by);
-          const steps = Math.max(Math.abs(nx - bx), Math.abs(ny - by));
-          for (let s = 1; s < steps; s++) {
-            if (sim.scrap.has(key(bx + sdx * s, by + sdy * s))) {
-              scrapTraps++;
-              break;
-            }
-          }
-        }
-        score += scrapTraps * W.scrapLineW;
-
-        let futureCollisions = 0;
-        for (const c of Object.values(futureCounts)) {
-          if (c > 1) futureCollisions += c;
-        }
-        score += futureCollisions * W.futureCollW;
-      }
-
-      if (sim.daleks.size > 1) {
-        const angles = new Set();
-        for (const dk of sim.daleks) {
-          const [bx, by] = parseKey(dk);
-          const a = Math.sign(nx - bx) + ',' + Math.sign(ny - by);
-          angles.add(a);
-        }
-        const duplicates = sim.daleks.size - angles.size;
-        score += duplicates * W.dupeAngleW;
-      }
-
-      // Urgency: as stale turns increase, strongly prefer moves that kill
-      if (state.staleTurns > 3 && sim.destroyed === 0 && sim2destroyed === 0) {
-        score -= state.staleTurns * 5;
-      }
-      // When stale, prefer getting closer to scrap (to lure daleks through it)
-      if (state.staleTurns > 5 && sim.scrap.size > 0) {
-        let minScrapDist = Infinity;
-        for (const sk of sim.scrap) {
-          const [sx, sy] = parseKey(sk);
-          const sd = Math.abs(nx - sx) + Math.abs(ny - sy);
-          if (sd < minScrapDist) minScrapDist = sd;
-        }
-        score -= minScrapDist * 2;
-      }
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestMove = d;
-      }
-    }
-
-  if (bestIsSonic) {
+  // Compare best move vs sonic
+  if (sonicBetter && sonicScore > bestScore) {
     doSonic();
   } else if (!bestMove) {
     doTeleport();
@@ -1356,12 +1359,12 @@ function runAutoplay() {
   }
 
   if (!state.gameOver && !state.levelComplete) {
-    if (learnFast) return; // batch loop handles next call
+    if (learnFast) return;
     autoplayTimer = setTimeout(runAutoplay, learningMode ? 20 : 200);
   } else if (state.levelComplete) {
     if (learnFast) {
       state = initState(state.level + 1, state.score);
-      return; // batch loop continues
+      return;
     }
     autoplayTimer = setTimeout(() => {
       hideOverlay();
