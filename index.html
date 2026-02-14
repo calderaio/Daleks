@@ -567,10 +567,8 @@ function sizeCanvas() {
   canvas.style.height = canvas.height + 'px';
 }
 
-let forceRender = false;
 function render() {
   if (!ctx) return;
-  if (learnFast && learningMode && !forceRender) return;
   const w = canvas.width, h = canvas.height;
   const bg = retroMode ? '#f0f0e8' : '#0a0a0a';
   const fg = retroMode ? '#000000' : '#00ff41';
@@ -955,7 +953,7 @@ function moveDaleks() {
     updateHighScore();
     if (!learnFast) showLevelComplete();
   }
-  render();
+  if (!learnFast) render();
 }
 
 function toggleAutoplay() {
@@ -1271,7 +1269,6 @@ function runAutoplay() {
     autoplayTimer = setTimeout(runAutoplay, learningMode ? 20 : 200);
   } else if (state.levelComplete) {
     if (learnFast) {
-      hideOverlay();
       state = initState(state.level + 1, state.score);
       return; // batch loop continues
     }
@@ -1297,11 +1294,7 @@ function runFastBatch() {
   }
   updateUI();
   // Render every 50th game so user can see progress
-  if ((gamesPlayed % 50) === 0) {
-    forceRender = true;
-    render();
-    forceRender = false;
-  }
+  if ((gamesPlayed % 50) === 0) render();
   if (learnFast && learningMode) {
     autoplayTimer = setTimeout(runFastBatch, 1);
   }
