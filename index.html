@@ -1076,13 +1076,16 @@ function toggleLearn() {
 
 function toggleFastLearn() {
   if (autoplayTimer) { clearTimeout(autoplayTimer); autoplayTimer = null; }
-  explosion = null; // kill any ongoing explosion animation
+  explosion = null;
   learnFast = !learnFast;
   updateFastButton();
   if (learnFast) {
-    // Start batch loop after repaint so button visually updates
+    // Double rAF: first fires before paint, second fires after paint
+    // This ensures button text is visible before heavy work starts
     requestAnimationFrame(() => {
-      if (learnFast && learningMode) runFastBatch();
+      requestAnimationFrame(() => {
+        if (learnFast && learningMode) runFastBatch();
+      });
     });
   } else {
     // Switch back to visible mode
@@ -1257,11 +1260,71 @@ function rollout(startPx, startPy, startDaleks, startScrap) {
   };
 }
 
+// Fast greedy AI: 3-turn lookahead, no beam search (for fast training mode)
+function pickMoveFast() {
+  const validMoves = getValidMoves(state.px, state.py, state.daleks, state.scrap);
+
+  // Evaluate sonic quickly
+  if (state.sonicUses > 0) {
+    let adj = 0;
+    for (const dk of state.daleks) {
+      const [bx, by] = parseKey(dk);
+      if (Math.abs(bx - state.px) <= 1 && Math.abs(by - state.py) <= 1) adj++;
+    }
+    if (adj >= 3 || (adj > 0 && validMoves.length <= 1)) return 'sonic';
+  }
+
+  if (validMoves.length === 0) return 'teleport';
+
+  let bestScore = -Infinity, bestMove = validMoves[0];
+  for (const d of validMoves) {
+    const nx = state.px + d.dx, ny = state.py + d.dy;
+    const s1 = simStep(nx, ny, state.daleks, state.scrap);
+    let score = s1.destroyed * 100;
+    if (s1.daleks.size === 0) return d; // clears level
+
+    // 2-turn lookahead
+    const s2 = simStep(nx, ny, s1.daleks, s1.scrap);
+    score += s2.destroyed * 60;
+    // 3-turn lookahead
+    if (s2.daleks.size > 0) {
+      const s3 = simStep(nx, ny, s2.daleks, s2.scrap);
+      score += s3.destroyed * 35;
+    }
+
+    // Escape routes
+    const esc = getValidMoves(nx, ny, s1.daleks, s1.scrap).length;
+    score += esc * 15;
+    if (esc === 0) score -= 5000;
+
+    // Collision angles
+    const angles = new Set();
+    for (const dk of s1.daleks) {
+      const [bx, by] = parseKey(dk);
+      angles.add(Math.sign(nx - bx) + ',' + Math.sign(ny - by));
+    }
+    score += (s1.daleks.size - angles.size) * 20;
+
+    if (score > bestScore) { bestScore = score; bestMove = d; }
+  }
+  return bestMove;
+}
+
 function runAutoplay() {
   if (!autoplayActive) return;
   if (state.gameOver || state.levelComplete) return;
 
-  // Get valid moves
+  // Fast mode uses lightweight AI
+  if (learnFast) {
+    const move = pickMoveFast();
+    if (move === 'sonic') { doSonic(); }
+    else if (move === 'teleport') { doTeleport(); }
+    else if (move.dx === 0 && move.dy === 0) { doWait(); }
+    else { doMove(move.dx, move.dy); }
+    return; // batch loop handles scheduling
+  }
+
+  // Full deep rollout AI for visible play
   const validMoves = getValidMoves(state.px, state.py, state.daleks, state.scrap);
 
   // Evaluate sonic option
@@ -1379,8 +1442,12 @@ function runAutoplay() {
 
 function runFastBatch() {
   if (!learnFast || !learningMode) { render(); return; }
-  // Run one evaluation (EVAL_GAMES games) per batch
-  runSilentGame();
+  // Run games for up to 100ms then yield to browser
+  const start = performance.now();
+  while (performance.now() - start < 100) {
+    if (!learnFast || !learningMode) break;
+    runSilentGame();
+  }
   updateUI();
   drawGraph();
   // Render board every 50th game so user can see progress
