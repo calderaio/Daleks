@@ -275,7 +275,8 @@ const DEFAULT_WEIGHTS = {
   scrapLineW: 25,     // bonus per dalek with scrap in its path
 };
 
-const POP_SIZE = 8;
+const POP_SIZE = 12;
+const EVAL_GAMES = 3; // games per weight evaluation to reduce noise
 let population = loadPopulation();
 let aiWeights = {...population[0].w};
 let aiGeneration = +(localStorage.getItem('daleksGeneration') || 0);
@@ -290,12 +291,14 @@ function loadPopulation() {
   try {
     const saved = localStorage.getItem('daleksPopulation');
     if (saved) {
-      const pop = JSON.parse(saved);
-      // Ensure all weights have new keys
-      return pop.map(p => ({w: {...DEFAULT_WEIGHTS, ...p.w}, score: p.score}));
+      const pop = JSON.parse(saved).map(p => ({w: {...DEFAULT_WEIGHTS, ...p.w}, score: p.score}));
+      // Grow population if POP_SIZE increased
+      while (pop.length < POP_SIZE) {
+        pop.push({w: mutateWeights(pop[0].w, 0.3), score: 0});
+      }
+      return pop.slice(0, POP_SIZE);
     }
   } catch(e) {}
-  // Initialize population with slight variations of defaults
   const pop = [];
   for (let i = 0; i < POP_SIZE; i++) {
     pop.push({w: i === 0 ? {...DEFAULT_WEIGHTS} : mutateWeights(DEFAULT_WEIGHTS, 0.3), score: 0});
@@ -343,13 +346,19 @@ function pickParent() {
 }
 
 function nextGenWeights() {
+  const r = Math.random();
+  if (r < 0.1) {
+    // 10% wild exploration — completely random weights
+    return mutateWeights(DEFAULT_WEIGHTS, 1.0);
+  }
   const p1 = pickParent();
   const p2 = pickParent();
-  // 70% crossover + mutate, 30% just mutate best
-  if (Math.random() < 0.7) {
-    return mutateWeights(crossover(p1.w, p2.w), 0.3);
+  if (r < 0.7) {
+    // 60% crossover + light mutation
+    return mutateWeights(crossover(p1.w, p2.w), 0.2);
   } else {
-    return mutateWeights(p1.w, 0.2 + Math.random() * 0.3);
+    // 30% mutate single parent (variable strength)
+    return mutateWeights(p1.w, 0.15 + Math.random() * 0.25);
   }
 }
 
@@ -1068,11 +1077,14 @@ function toggleLearn() {
 
 function toggleFastLearn() {
   if (autoplayTimer) { clearTimeout(autoplayTimer); autoplayTimer = null; }
+  explosion = null; // kill any ongoing explosion animation
   learnFast = !learnFast;
   updateFastButton();
   if (learnFast) {
     // Start batch loop after repaint so button visually updates
-    requestAnimationFrame(() => { runFastBatch(); });
+    requestAnimationFrame(() => {
+      if (learnFast && learningMode) runFastBatch();
+    });
   } else {
     // Switch back to visible mode
     autoplayActive = true;
@@ -1365,49 +1377,54 @@ function runAutoplay() {
 
 function runFastBatch() {
   if (!learnFast || !learningMode) { render(); return; }
-  const start = performance.now();
-  const startGames = gamesPlayed;
-  // Run full games silently for up to 80ms
-  while (performance.now() - start < 80) {
-    if (!learningMode || !learnFast) break;
-    runSilentGame();
-  }
+  // Run one evaluation (EVAL_GAMES games) per batch
+  runSilentGame();
   updateUI();
   drawGraph();
-  // Render every 50th game so user can see progress
-  if ((gamesPlayed % 50) === 0) render();
+  // Render board every 50th game so user can see progress
+  if ((gamesPlayed % 50) < EVAL_GAMES) render();
   if (learnFast && learningMode) {
     autoplayTimer = setTimeout(runFastBatch, 1);
   }
 }
 
-function runSilentGame() {
+function playSingleSilentGame() {
   state = initState(1, 0);
   autoplayActive = true;
-  aiWeights = nextGenWeights();
   let turns = 0;
-  const maxTurns = 5000; // safety limit
-
+  const maxTurns = 5000;
   while (turns < maxTurns) {
     if (state.gameOver) break;
     if (state.levelComplete) {
       state = initState(state.level + 1, state.score);
       continue;
     }
-    // Run one AI turn (calls doMove/doWait/doTeleport/doSonic which call moveDaleks)
     runAutoplay();
     turns++;
   }
+  return state.score;
+}
 
-  // Record result
+function runSilentGame() {
+  aiWeights = nextGenWeights();
+  // Play multiple games with same weights to reduce noise
+  const scores = [];
+  for (let g = 0; g < EVAL_GAMES; g++) {
+    scores.push(playSingleSilentGame());
+  }
+  // Use median score for evaluation (robust to outliers)
+  scores.sort((a, b) => a - b);
+  const medianScore = scores[Math.floor(scores.length / 2)];
+
   aiGeneration++;
-  gamesPlayed++;
-  recordScore(state.score);
+  gamesPlayed += EVAL_GAMES;
+  for (const s of scores) recordScore(s);
 
+  // Replace worst in population if this is better (elitism: top 3 are protected)
   population.sort((a, b) => b.score - a.score);
-  const worst = population[population.length - 1];
-  if (state.score > worst.score) {
-    population[population.length - 1] = {w: {...aiWeights}, score: state.score};
+  const replaceIdx = population.length - 1;
+  if (medianScore > population[replaceIdx].score) {
+    population[replaceIdx] = {w: {...aiWeights}, score: medianScore};
     population.sort((a, b) => b.score - a.score);
   }
   bestAIScore = population[0].score;
@@ -1445,7 +1462,7 @@ function endGame() {
     aiWeights = nextGenWeights();
 
     playExplosion(state.px, state.py, () => {
-      if (!learningMode) return;
+      if (!learningMode || learnFast) return; // fast mode handles its own loop
       drawGraph();
       state = initState(1, 0);
       autoplayActive = true;
