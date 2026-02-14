@@ -567,9 +567,10 @@ function sizeCanvas() {
   canvas.style.height = canvas.height + 'px';
 }
 
+let forceRender = false;
 function render() {
   if (!ctx) return;
-  if (learnFast && learningMode) return;
+  if (learnFast && learningMode && !forceRender) return;
   const w = canvas.width, h = canvas.height;
   const bg = retroMode ? '#f0f0e8' : '#0a0a0a';
   const fg = retroMode ? '#000000' : '#00ff41';
@@ -1297,9 +1298,9 @@ function runFastBatch() {
   updateUI();
   // Render every 50th game so user can see progress
   if ((gamesPlayed % 50) === 0) {
-    learnFast = false; // temporarily allow render
+    forceRender = true;
     render();
-    learnFast = true;
+    forceRender = false;
   }
   if (learnFast && learningMode) {
     autoplayTimer = setTimeout(runFastBatch, 1);
